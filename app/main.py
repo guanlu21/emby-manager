@@ -409,6 +409,10 @@ def edit_user_page(request: Request, user_id: int, error: str = ""):
     u = _decorate_user(u)
     client = _get_client_or_none()
     libraries, live_policy = [], None
+    # 复选框默认用本地记录的 library_ids 兜底；如果能连上 Emby，优先用
+    # Emby 里实时的 EnabledFolders 来勾选，这样才是真正生效的状态
+    # （避免本地记录跟 Emby 实际状态不一致时，页面显示的勾选状态是错的）。
+    selected_lib_ids = u["library_ids"]
     if client:
         try:
             libraries = client.list_libraries()
@@ -416,10 +420,12 @@ def edit_user_page(request: Request, user_id: int, error: str = ""):
             error = str(e)
         try:
             live_policy = client.get_effective_policy_summary(u["emby_user_id"], libraries)
+            if not live_policy.get("enable_all_folders"):
+                selected_lib_ids = live_policy.get("enabled_folder_ids") or []
         except EmbyError as e:
             live_policy = {"error": str(e)}
     return render(request, "user_form.html", mode="edit", user=u, libraries=libraries,
-                  selected_lib_ids=u["library_ids"], error=error, form=None,
+                  selected_lib_ids=selected_lib_ids, error=error, form=None,
                   live_policy=live_policy)
 
 

@@ -41,17 +41,43 @@ class EmbyClient:
         return resp.json()
 
     def list_libraries(self):
-        """返回媒体库列表 [{Id, Name}]"""
-        resp = self._request("GET", "/Library/VirtualFolders")
-        data = resp.json()
-        result = []
-        for item in data:
-            # Emby 新版本用 "Id"，旧版本只有 "ItemId"（同一个值的两个字段名，
-            # 官方文档写的是"Id string — ItemId came first, so that is left for
-            # compatability purposes"），这里两个都取一下，优先用 Id。
-            lib_id = item.get("Id") or item.get("ItemId")
-            result.append({"Id": lib_id, "Name": item.get("Name")})
-        return result
+        """
+        返回媒体库列表 [{Id, Name}]，这里特意用 /Library/SelectableMediaFolders
+        而不是 /Library/VirtualFolders。
+
+        排查过程记录（重要，别改回 VirtualFolders）：
+        /Library/VirtualFolders 是管理端"媒体库管理"页面在用的接口，它返回的
+        "Id"/"ItemId" 有时候跟真正用于 /Users/{id}/Policy 里 EnabledFolders
+        字段匹配所需要的 Id 对不上（具体哪些库会对不上、什么情况下对不上，
+        没有很稳定的规律，实测出现过"勾选了 8 个库，保存后客户端却只能看到
+        其中 1 个"这种情况）。
+        而 /Library/SelectableMediaFolders 才是 Emby 官方"设置用户媒体库访问
+        权限"专用的接口（官方文档字段里带有 IsUserAccessConfigurable），
+        返回的 Id 就是可以直接放进 EnabledFolders 里、能保证生效的 Id。
+
+        另外这个接口返回的每一项都带 IsUserAccessConfigurable 字段：为
+        false 表示这个"库"（常见于 合集/Collections 这类聚合视图）本身就
+        不支持按用户限制访问，Emby 会让所有账号都能看到它，跟 EnabledFolders
+        里勾不勾选没关系。这种条目直接从可勾选列表里过滤掉，避免管理员以为
+        勾掉了它就能让某个用户看不到"合集"，实际上勾了也没用。
+        """
+        try:
+            resp = self._request("GET", "/Library/SelectableMediaFolders")
+            data = resp.json()
+            return [
+                {"Id": item.get("Id"), "Name": item.get("Name")}
+                for item in data
+                if item.get("IsUserAccessConfigurable", True)
+            ]
+        except EmbyError:
+            # 极老版本 Emby 可能没有这个接口，退回到 VirtualFolders 作为兜底
+            resp = self._request("GET", "/Library/VirtualFolders")
+            data = resp.json()
+            result = []
+            for item in data:
+                lib_id = item.get("Id") or item.get("ItemId")
+                result.append({"Id": lib_id, "Name": item.get("Name")})
+            return result
 
     def list_emby_users(self):
         resp = self._request("GET", "/Users")
