@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}登录{% endblock %}
+{% block content %}
+<div class="card auth-card">
+  <h2>{{ "初始化管理员密码" if not setup_done else "登录" }}</h2>
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  {% if not setup_done %}
+    <p class="muted">首次使用，请设置管理员登录密码（用于保护本管理面板，不是 Emby 密码）。</p>
+    <form method="post" action="/setup">
+      <label>设置管理员密码</label>
+      <input type="password" name="password" required minlength="4">
+      <label>确认密码</label>
+      <input type="password" name="password2" required minlength="4">
+      <button type="submit">完成初始化</button>
+    </form>
+  {% else %}
+    <form method="post" action="/login">
+      <label>管理员密码</label>
+      <input type="password" name="password" required autofocus>
+      <button type="submit">登录</button>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

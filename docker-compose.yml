@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  emby-manager:
+    # 方式一：如果你的 NAS 面板支持"从 Dockerfile / 源码构建"，直接用下面这行：
+    build: .
+    # 方式二：如果使用预构建好的 arm64 镜像（见 README 的 GitHub Actions 说明），
+    # 注释掉上面的 build: . ，改用 image: 你的镜像地址，例如：
+    # image: ghcr.io/yourname/emby-manager:latest
+    container_name: emby-manager
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      # 用于加密登录会话的密钥，建议改成随机字符串（否则每次重建容器都会重新登录）
+      - SECRET_KEY=please-change-this-to-a-random-string
+    # 如果 Emby 与本容器需要通过容器名互相访问，请确保它们在同一个 docker network：
+    # networks:
+    #   - your_existing_network
+
+# networks:
+#   your_existing_network:
+#     external: true

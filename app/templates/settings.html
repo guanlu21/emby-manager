@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}设置{% endblock %}
+{% block content %}
+
+<div class="page-head"><h2>设置</h2></div>
+
+{% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<div class="card">
+  <h3>Emby 服务器连接</h3>
+  <form method="post" action="/settings/emby">
+    <label>Emby 服务器地址（容器内网访问地址，例如 http://emby:8096 或 http://192.168.1.x:8096）</label>
+    <input type="text" name="emby_url" value="{{ settings.emby_url }}" placeholder="http://192.168.1.10:8096" required>
+    <label>Emby API Key</label>
+    <input type="text" name="emby_api_key" value="{{ settings.emby_api_key }}" required>
+    <p class="muted small">API Key 获取方式：Emby 管理后台 → 高级 → API 密钥 → 新建</p>
+    <button type="submit" class="btn primary">保存并测试连接</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3>青龙面板通知对接</h3>
+  <p class="muted">在青龙面板中新建一个定时任务，调用下面的接口获取「即将到期」和「今日到期」的用户名单，
+  然后用青龙自带的 <code>sendNotify</code> 发送通知。示例脚本见下载包中的 <code>qinglong_notify_example.js</code>。</p>
+  <label>接口地址（在青龙容器内访问，将 EMBY_MGR_HOST 替换为本容器的名称或IP）</label>
+  <input type="text" readonly value="http://EMBY_MGR_HOST:8000/api/qinglong/report?token={{ settings.qinglong_token }}&days=3">
+  <div class="row-inline">
+    <button type="button" class="btn" onclick="copyToken()">复制接口地址</button>
+    <form method="post" action="/settings/reset-token" onsubmit="return confirm('重置后旧的青龙脚本需要更新新token，确认？');">
+      <button type="submit" class="btn warn">重置 Token</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h3>修改管理员密码</h3>
+  <form method="post" action="/settings/password">
+    <label>新密码</label>
+    <input type="password" name="password" required minlength="4">
+    <label>确认新密码</label>
+    <input type="password" name="password2" required minlength="4">
+    <button type="submit" class="btn">修改密码</button>
+  </form>
+</div>
+
+<script>
+function copyToken(){
+  const input = document.querySelector('input[readonly]');
+  input.select();
+  document.execCommand('copy');
+  alert('已复制到剪贴板');
+}
+</script>
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ "新建用户" if mode == "new" else "编辑用户" }}{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <h2>{{ "新建用户" if mode == "new" else "编辑用户: " + user.username }}</h2>
+  <a class="btn" href="/">返回列表</a>
+</div>
+
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<form class="card" method="post" action="{{ '/users' if mode == 'new' else '/users/' + user.id|string + '/update' }}">
+  {% if mode == "new" %}
+  <label>用户名</label>
+  <input type="text" name="username" required value="{{ form.username if form else '' }}">
+
+  <label>初始密码</label>
+  <input type="text" name="password" required value="{{ form.password if form else '' }}">
+  {% endif %}
+
+  <label>备注（可选，例如联系方式）</label>
+  <input type="text" name="note" value="{{ user.note if user else (form.note if form else '') }}">
+
+  <label>使用期限</label>
+  <div class="row-inline">
+    <select name="duration_preset" id="duration_preset" onchange="onDurationPresetChange()">
+      <option value="">永久（不设置到期时间）</option>
+      <option value="7">7 天</option>
+      <option value="30" selected>30 天</option>
+      <option value="90">90 天</option>
+      <option value="365">365 天</option>
+      <option value="custom">自定义日期</option>
+    </select>
+    <input type="date" name="expire_date" id="expire_date_input" style="display:none"
+           value="{{ user.expire_date_input if user else '' }}">
+  </div>
+  <p class="muted small">{{ "新建时从今天起计算" if mode == "new" else "留空「永久」将清除到期时间" }}</p>
+
+  <label>可访问的媒体库</label>
+  <div class="lib-list">
+    {% for lib in libraries %}
+    <label class="checkbox">
+      <input type="checkbox" name="library_ids" value="{{ lib.Id }}"
+             {% if lib.Id in selected_lib_ids %}checked{% endif %}>
+      {{ lib.Name }}
+    </label>
+    {% else %}
+    <p class="muted">未能获取媒体库列表，请检查「设置」中的 Emby 连接信息。</p>
+    {% endfor %}
+  </div>
+
+  <div class="row-inline">
+    <label class="checkbox">
+      <input type="checkbox" name="enable_download" {% if user and user.enable_download %}checked{% endif %}>
+      允许下载
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="enable_upload" {% if user and user.enable_upload %}checked{% endif %}>
+      允许上传 (相机上传)
+    </label>
+  </div>
+
+  <button type="submit" class="btn primary">{{ "创建用户" if mode == "new" else "保存修改" }}</button>
+</form>
+
+<script>
+function onDurationPresetChange(){
+  const sel = document.getElementById('duration_preset');
+  const dateInput = document.getElementById('expire_date_input');
+  dateInput.style.display = sel.value === 'custom' ? 'inline-block' : 'none';
+}
+</script>
+{% endblock %}
