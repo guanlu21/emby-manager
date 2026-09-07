@@ -37,7 +37,12 @@
   <p class="muted small">{{ "新建时从今天起计算" if mode == "new" else "留空「永久」将清除到期时间" }}</p>
 
   <label>可访问的媒体库</label>
-  <div class="lib-list">
+  <div class="row-inline" style="margin-bottom:6px">
+    <button type="button" class="btn small" onclick="setAllLibs(true)">全选</button>
+    <button type="button" class="btn small" onclick="setAllLibs(false)">全不选</button>
+    <button type="button" class="btn small" onclick="invertLibs()">反选</button>
+  </div>
+  <div class="lib-list" id="lib-list">
     {% for lib in libraries %}
     <label class="checkbox">
       <input type="checkbox" name="library_ids" value="{{ lib.Id }}"
@@ -49,25 +54,70 @@
     {% endfor %}
   </div>
 
+  <label>下载权限</label>
   <div class="row-inline">
     <label class="checkbox">
       <input type="checkbox" name="enable_download" {% if user and user.enable_download %}checked{% endif %}>
       允许下载
     </label>
     <label class="checkbox">
+      <input type="checkbox" name="enable_download_transcode"
+             {% if user and user.enable_download_transcode %}checked{% endif %}>
+      允许下载需要转码的媒体
+    </label>
+  </div>
+
+  <label>其他权限</label>
+  <div class="row-inline">
+    <label class="checkbox">
       <input type="checkbox" name="enable_upload" {% if user and user.enable_upload %}checked{% endif %}>
       允许上传 (相机上传)
     </label>
   </div>
+  <p class="muted small">电视直播 / 直播录制管理会统一强制关闭，不在此处提供开关。</p>
 
   <button type="submit" class="btn primary">{{ "创建用户" if mode == "new" else "保存修改" }}</button>
 </form>
+
+{% if live_policy %}
+<div class="card" style="border-color:#c78300">
+  <h3>Emby 实时校验（用于排查"页面设置了但没生效"）</h3>
+  {% if live_policy.error %}
+    <p class="muted">无法从 Emby 读取当前策略：{{ live_policy.error }}</p>
+  {% else %}
+    <p class="muted small">以下是刚从 Emby 服务器实时读取到的、该用户当前<b>真正生效</b>的设置：</p>
+    <ul>
+      <li>EnableAllFolders（是否不限制媒体库，为 true 说明所有库都能看）：<b>{{ live_policy.enable_all_folders }}</b></li>
+      <li>实际生效的媒体库数量：<b>{{ live_policy.enabled_folder_ids|length }}</b>
+        {% if live_policy.matched_library_names %}
+          （{{ live_policy.matched_library_names|join('、') }}）
+        {% elif live_policy.enabled_folder_ids %}
+          <span class="badge-danger">— 有 {{ live_policy.enabled_folder_ids|length }} 个ID，但没有一个能匹配上当前媒体库列表，说明ID格式不一致，这就是问题所在，请把下面这行原始ID截图发给开发者：</span>
+          <br><code>{{ live_policy.enabled_folder_ids }}</code>
+        {% else %}
+          <span class="badge-danger">— 0个，也就是没有任何库被授权（如果你在上面勾选了媒体库，说明保存没有生效）</span>
+        {% endif %}
+      </li>
+      <li>允许下载：<b>{{ live_policy.enable_download }}</b>，允许下载转码媒体：<b>{{ live_policy.enable_media_conversion }}</b></li>
+      <li>允许相机上传：<b>{{ live_policy.allow_camera_upload }}</b></li>
+      <li>账号是否被禁用：<b>{{ live_policy.is_disabled }}</b></li>
+    </ul>
+  {% endif %}
+</div>
+{% endif %}
+
 
 <script>
 function onDurationPresetChange(){
   const sel = document.getElementById('duration_preset');
   const dateInput = document.getElementById('expire_date_input');
   dateInput.style.display = sel.value === 'custom' ? 'inline-block' : 'none';
+}
+function setAllLibs(checked){
+  document.querySelectorAll('#lib-list input[type=checkbox]').forEach(cb => cb.checked = checked);
+}
+function invertLibs(){
+  document.querySelectorAll('#lib-list input[type=checkbox]').forEach(cb => cb.checked = !cb.checked);
 }
 </script>
 {% endblock %}

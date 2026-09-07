@@ -46,8 +46,11 @@ class EmbyClient:
         data = resp.json()
         result = []
         for item in data:
-            # VirtualFolders 返回的 ItemId 即 Policy.EnabledFolders 需要的 Id
-            result.append({"Id": item.get("ItemId"), "Name": item.get("Name")})
+            # Emby 新版本用 "Id"，旧版本只有 "ItemId"（同一个值的两个字段名，
+            # 官方文档写的是"Id string — ItemId came first, so that is left for
+            # compatability purposes"），这里两个都取一下，优先用 Id。
+            lib_id = item.get("Id") or item.get("ItemId")
+            result.append({"Id": lib_id, "Name": item.get("Name")})
         return result
 
     def list_emby_users(self):
@@ -80,14 +83,43 @@ class EmbyClient:
         self._request("POST", f"/Users/{emby_user_id}/Policy", json=policy)
         return policy
 
-    def set_libraries_and_permissions(self, emby_user_id, library_ids, enable_download, enable_upload):
+    def set_libraries_and_permissions(
+        self, emby_user_id, library_ids, enable_download,
+        enable_download_transcoded, enable_upload,
+    ):
         patch = {
             "EnableAllFolders": False,
-            "EnabledFolders": library_ids,
+            "EnabledFolders": list(library_ids),
             "EnableContentDownloading": bool(enable_download),
+            # "允许下载需要转码的媒体"：对应 Emby 的媒体转换/同步转码权限。
+            "EnableMediaConversion": bool(enable_download_transcoded),
+            "EnableSyncTranscoding": bool(enable_download_transcoded),
             "AllowCameraUpload": bool(enable_upload),
+            # 用户明确要求关闭这两项，不做成可配置项，统一关闭
+            "EnableLiveTvAccess": False,
+            "EnableLiveTvManagement": False,
         }
         return self.update_policy(emby_user_id, patch)
+
+    def get_effective_policy_summary(self, emby_user_id, libraries):
+        """
+        从 Emby 实时拉取该用户当前真正生效的策略，用于在页面上做校验展示，
+        排查"页面上勾选了但 Emby 里没生效"这类问题。
+        """
+        user = self.get_user(emby_user_id)
+        policy = user.get("Policy", {}) or {}
+        enabled_ids = policy.get("EnabledFolders") or []
+        matched_names = [lib["Name"] for lib in libraries if lib["Id"] in enabled_ids]
+        return {
+            "enable_all_folders": policy.get("EnableAllFolders"),
+            "enabled_folder_ids": enabled_ids,
+            "matched_library_names": matched_names,
+            "enable_download": policy.get("EnableContentDownloading"),
+            "enable_media_conversion": policy.get("EnableMediaConversion"),
+            "allow_camera_upload": policy.get("AllowCameraUpload"),
+            "is_disabled": policy.get("IsDisabled"),
+            "enable_live_tv": policy.get("EnableLiveTvAccess"),
+        }
 
     def set_disabled(self, emby_user_id: str, disabled: bool):
         return self.update_policy(emby_user_id, {"IsDisabled": bool(disabled)})

@@ -54,4 +54,43 @@ tr.row-danger{background:#fff7f6}
 .alert.error{background:#fdecea; color:var(--danger)}
 .alert.warn{background:#fff6e5; color:var(--warn)}
 .actions{white-space:nowrap}
-code{background:#f1f3f5; padding:2px 6px; border-radius:4px; font-size:13px}
+code{background:#f1f3f5; padding:2px 6px; border-radius:4px; font-size:13px; word-break:break-all}
+
+/* ---------------- 手机端适配 ---------------- */
+@media (max-width: 768px) {
+  .topbar{padding:12px 14px; flex-wrap:wrap; gap:8px}
+  .topbar nav a{margin-left:0; margin-right:16px; font-size:13px}
+  .container{margin:14px auto; padding:0 10px}
+  .card{padding:16px; max-width:100%}
+  h2{font-size:19px}
+  .page-head{flex-wrap:wrap; gap:10px}
+  .page-head h2{margin:0}
+
+  /* 表格在小屏幕上改成"卡片堆叠"布局，不需要横向拖拽 */
+  table.table thead{display:none}
+  table.table, table.table tbody, table.table tr, table.table td{display:block; width:100%}
+  table.table{border-radius:10px}
+  table.table tr{
+    border:1px solid var(--border); border-radius:10px; margin-bottom:12px;
+    padding:10px 12px; background:#fff;
+  }
+  table.table tr.row-danger{background:#fff7f6}
+  table.table td{
+    border-bottom:none; padding:6px 0; display:flex; justify-content:space-between;
+    align-items:center; gap:12px; font-size:14px;
+  }
+  table.table td::before{
+    content: attr(data-label); color:var(--muted); font-size:12px; flex-shrink:0;
+  }
+  table.table td.actions{
+    flex-wrap:wrap; justify-content:flex-start; padding-top:10px; margin-top:6px;
+    border-top:1px solid var(--border);
+  }
+  table.table td.actions::before{display:none}
+  table.table td.actions .btn, table.table td.actions form{margin:2px 4px 2px 0}
+
+  .lib-list{max-height:180px}
+  .row-inline{gap:10px}
+  .auth-card{margin:40px auto}
+}
+

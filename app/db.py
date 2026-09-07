@@ -47,11 +47,18 @@ def init_db():
                 expire_at INTEGER,               -- unix timestamp, NULL = 永久
                 library_ids TEXT DEFAULT '[]',   -- JSON array
                 enable_download INTEGER DEFAULT 0,
+                enable_download_transcode INTEGER DEFAULT 0,
                 enable_upload INTEGER DEFAULT 0,
                 status TEXT DEFAULT 'active',    -- active / disabled / expired / deleted
                 last_notified_date TEXT DEFAULT ''
             )
         """)
+        # 兼容旧版本数据库升级：如果是从没有这个字段的老版本升级上来的，
+        # 补一下这个字段，已存在就忽略报错。
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN enable_download_transcode INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,16 +108,18 @@ def get_all_settings():
 
 # ---------------- users ----------------
 
-def add_user(emby_user_id, username, expire_at, library_ids, enable_download, enable_upload, note=""):
+def add_user(emby_user_id, username, expire_at, library_ids, enable_download,
+             enable_upload, enable_download_transcode=False, note=""):
     with get_conn() as conn:
         conn.execute(
             """INSERT INTO users
                (emby_user_id, username, note, created_at, expire_at, library_ids,
-                enable_download, enable_upload, status)
-               VALUES (?,?,?,?,?,?,?,?, 'active')""",
+                enable_download, enable_download_transcode, enable_upload, status)
+               VALUES (?,?,?,?,?,?,?,?,?, 'active')""",
             (
                 emby_user_id, username, note, int(time.time()), expire_at,
-                json.dumps(library_ids), int(enable_download), int(enable_upload),
+                json.dumps(library_ids), int(enable_download),
+                int(enable_download_transcode), int(enable_upload),
             ),
         )
 

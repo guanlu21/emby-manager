@@ -137,7 +137,7 @@ def new_user_page(request: Request):
     else:
         error = "尚未配置 Emby 连接信息，请先前往设置页面配置"
     return render(request, "user_form.html", mode="new", user=None, libraries=libraries,
-                  selected_lib_ids=[], error=error, form=None)
+                  selected_lib_ids=[], error=error, form=None, live_policy=None)
 
 
 @app.post("/users")
@@ -150,6 +150,7 @@ def create_user(
     expire_date: str = Form(""),
     library_ids: list = Form([]),
     enable_download: str = Form(None),
+    enable_download_transcode: str = Form(None),
     enable_upload: str = Form(None),
 ):
     guard = _guard(request)
@@ -176,11 +177,13 @@ def create_user(
         emby_id = emby_user["Id"]
         client.set_password(emby_id, password)
         client.set_libraries_and_permissions(
-            emby_id, library_ids, bool(enable_download), bool(enable_upload)
+            emby_id, library_ids, bool(enable_download),
+            bool(enable_download_transcode), bool(enable_upload),
         )
         db.add_user(
             emby_user_id=emby_id, username=username, expire_at=expire_at,
             library_ids=library_ids, enable_download=bool(enable_download),
+            enable_download_transcode=bool(enable_download_transcode),
             enable_upload=bool(enable_upload), note=note,
         )
         db.add_log(username, "create", f"expire_at={expire_at}")
@@ -189,7 +192,8 @@ def create_user(
         libraries = client2.list_libraries() if client2 else []
         return render(request, "user_form.html", mode="new", user=None, libraries=libraries,
                       selected_lib_ids=library_ids, error=f"创建失败: {e}",
-                      form={"username": username, "password": password, "note": note})
+                      form={"username": username, "password": password, "note": note},
+                      live_policy=None)
 
     return RedirectResponse(f"/?msg=用户 {username} 创建成功", status_code=303)
 
@@ -197,7 +201,7 @@ def create_user(
 # ---------------- 编辑用户 ----------------
 
 @app.get("/users/{user_id}/edit", response_class=HTMLResponse)
-def edit_user_page(request: Request, user_id: int):
+def edit_user_page(request: Request, user_id: int, error: str = ""):
     guard = _guard(request)
     if guard:
         return guard
@@ -206,14 +210,19 @@ def edit_user_page(request: Request, user_id: int):
         return RedirectResponse("/?error=用户不存在", status_code=303)
     u = _decorate_user(u)
     client = _get_client_or_none()
-    libraries, error = [], ""
+    libraries, live_policy = [], None
     if client:
         try:
             libraries = client.list_libraries()
         except EmbyError as e:
             error = str(e)
+        try:
+            live_policy = client.get_effective_policy_summary(u["emby_user_id"], libraries)
+        except EmbyError as e:
+            live_policy = {"error": str(e)}
     return render(request, "user_form.html", mode="edit", user=u, libraries=libraries,
-                  selected_lib_ids=u["library_ids"], error=error, form=None)
+                  selected_lib_ids=u["library_ids"], error=error, form=None,
+                  live_policy=live_policy)
 
 
 @app.post("/users/{user_id}/update")
@@ -225,6 +234,7 @@ def update_user(
     expire_date: str = Form(""),
     library_ids: list = Form([]),
     enable_download: str = Form(None),
+    enable_download_transcode: str = Form(None),
     enable_upload: str = Form(None),
 ):
     guard = _guard(request)
@@ -250,12 +260,14 @@ def update_user(
     try:
         if client:
             client.set_libraries_and_permissions(
-                u["emby_user_id"], library_ids, bool(enable_download), bool(enable_upload)
+                u["emby_user_id"], library_ids, bool(enable_download),
+                bool(enable_download_transcode), bool(enable_upload),
             )
         db.update_user(
             user_id, note=note, expire_at=expire_at,
             library_ids=json.dumps(library_ids),
             enable_download=int(bool(enable_download)),
+            enable_download_transcode=int(bool(enable_download_transcode)),
             enable_upload=int(bool(enable_upload)),
         )
         db.add_log(u["username"], "update", "")

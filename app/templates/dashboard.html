@@ -33,26 +33,26 @@
   <tbody>
     {% for u in users %}
     <tr class="{{ 'row-danger' if u.status != 'active' else '' }}">
-      <td>{{ u.username }}</td>
-      <td class="muted">{{ u.note or '-' }}</td>
-      <td>{{ u.expire_at_str or '永久' }}</td>
-      <td>
+      <td data-label="用户名"><b>{{ u.username }}</b></td>
+      <td data-label="备注" class="muted">{{ u.note or '-' }}</td>
+      <td data-label="到期时间">{{ u.expire_at_str or '永久' }}</td>
+      <td data-label="剩余">
         {% if u.days_left is not none %}
           <span class="{{ 'badge-warn' if u.days_left <= 3 and u.days_left >= 0 else ('badge-danger' if u.days_left < 0 else '') }}">
             {{ u.days_left }} 天
           </span>
         {% else %}-{% endif %}
       </td>
-      <td>
+      <td data-label="状态">
         {% if u.status == 'active' %}<span class="badge-ok">正常</span>
         {% elif u.status == 'expired' %}<span class="badge-danger">已到期</span>
         {% elif u.status == 'disabled' %}<span class="badge-warn">已禁用</span>
         {% else %}{{ u.status }}{% endif %}
       </td>
-      <td>{{ '✅' if u.enable_download else '🚫' }}</td>
-      <td>{{ '✅' if u.enable_upload else '🚫' }}</td>
-      <td>{{ u.library_count }}</td>
-      <td class="actions">
+      <td data-label="下载">{{ '✅' if u.enable_download else '🚫' }}</td>
+      <td data-label="上传">{{ '✅' if u.enable_upload else '🚫' }}</td>
+      <td data-label="媒体库数">{{ u.library_count }}</td>
+      <td data-label="操作" class="actions">
         <a class="btn small" href="/users/{{ u.id }}/edit">编辑</a>
         <form class="inline" method="post" action="/users/{{ u.id }}/extend" onsubmit="return promptExtend(event, this)">
           <button class="btn small" type="submit">续期</button>
