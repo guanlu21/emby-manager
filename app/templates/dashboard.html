@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% block title %}用户列表{% endblock %}
 {% block content %}
 
 {% if not emby_configured %}
@@ -12,6 +11,7 @@
   <h2>用户列表 ({{ users|length }})</h2>
   <div>
     <a class="btn" href="/users/import">导入已有用户</a>
+    <a class="btn" href="/users/batch-new">批量创建用户</a>
     <a class="btn primary" href="/users/new">+ 新建用户</a>
   </div>
 </div>
@@ -19,9 +19,18 @@
 {% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
 {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
 
+<div class="row-inline" style="margin-bottom:10px">
+  <button type="button" class="btn small" onclick="batchExtend()">批量续期</button>
+  <button type="button" class="btn small warn" onclick="batchAction('disable', '确认批量停用选中的用户？')">批量停用</button>
+  <button type="button" class="btn small ok" onclick="batchAction('enable', '确认批量启用选中的用户？')">批量启用</button>
+  <button type="button" class="btn small danger" onclick="batchAction('delete', '确认从 Emby 批量删除选中的用户？此操作不可恢复！')">批量删除</button>
+  <span class="muted small">先在下表勾选用户，再点击以上按钮</span>
+</div>
+
 <table class="table">
   <thead>
     <tr>
+      <th style="width:36px"><input type="checkbox" id="select-all" onclick="toggleAllRows(this)"></th>
       <th>用户名</th>
       <th>备注</th>
       <th>到期时间</th>
@@ -36,6 +45,7 @@
   <tbody>
     {% for u in users %}
     <tr class="{{ 'row-danger' if u.status != 'active' else '' }}">
+      <td data-label="选择"><input type="checkbox" class="row-select" value="{{ u.id }}"></td>
       <td data-label="用户名"><b>{{ u.username }}</b></td>
       <td data-label="备注" class="muted">{{ u.note or '-' }}</td>
       <td data-label="到期时间">{{ u.expire_at_str or '永久' }}</td>
@@ -75,9 +85,16 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="9" class="muted center">暂无用户，点击右上角「新建用户」开始</td></tr>
+    <tr><td colspan="10" class="muted center">暂无用户，点击右上角「新建用户」开始</td></tr>
     {% endfor %}
   </tbody>
 </table>
+
+<form id="batch-extend-form" method="post" action="/users/batch-extend" style="display:none">
+  <input type="hidden" name="days" id="batch-days-input" value="">
+</form>
+<form id="batch-disable-form" method="post" action="/users/batch-disable" style="display:none"></form>
+<form id="batch-enable-form" method="post" action="/users/batch-enable" style="display:none"></form>
+<form id="batch-delete-form" method="post" action="/users/batch-delete" style="display:none"></form>
 
 {% endblock %}

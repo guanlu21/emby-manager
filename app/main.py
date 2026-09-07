@@ -1,5 +1,6 @@
 import datetime
 import json
+import secrets
 import time
 
 from fastapi import FastAPI, Request, Form, Query
@@ -90,6 +91,70 @@ def _get_client_or_none():
     if not url or not key:
         return None
     return EmbyClient(url, key)
+
+
+def _calc_expire_at(duration_preset: str, expire_date: str, base_ts: int = None):
+    """
+    统一计算到期时间戳。duration_preset 为空字符串代表"永久"（返回 None）。
+    """
+    try:
+        if duration_preset == "custom" and expire_date:
+            dt = datetime.datetime.strptime(expire_date, "%Y-%m-%d")
+            return int(dt.timestamp())
+        elif duration_preset and duration_preset != "custom":
+            base = base_ts if base_ts is not None else int(time.time())
+            return base + int(duration_preset) * 86400
+    except ValueError:
+        pass
+    return None
+
+
+_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+
+def _gen_random_password(length: int = 10) -> str:
+    """生成随机密码，去掉容易看混的字符 (0/O, 1/l/I 等)。"""
+    return "".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(length))
+
+
+def _do_disable(u: dict):
+    client = _get_client_or_none()
+    if client:
+        client.set_disabled(u["emby_user_id"], True)
+    db.update_user(u["id"], status="disabled")
+    db.add_log(u["username"], "manual_disable", "")
+
+
+def _do_enable(u: dict):
+    client = _get_client_or_none()
+    if client:
+        client.set_disabled(u["emby_user_id"], False)
+    db.update_user(u["id"], status="active")
+    db.add_log(u["username"], "manual_enable", "")
+
+
+def _do_delete(u: dict):
+    client = _get_client_or_none()
+    if client:
+        client.delete_user(u["emby_user_id"])
+    db.delete_user_row(u["id"])
+    db.add_log(u["username"], "delete", "")
+
+
+def _do_extend(u: dict, days: int):
+    base = u["expire_at"] if u["expire_at"] and u["expire_at"] > int(time.time()) else int(time.time())
+    new_expire = base + days * 86400
+    updates = {"expire_at": new_expire}
+    if u["status"] in ("expired", "disabled") and new_expire > int(time.time()):
+        client = _get_client_or_none()
+        try:
+            if client:
+                client.set_disabled(u["emby_user_id"], False)
+            updates["status"] = "active"
+        except EmbyError:
+            pass
+    db.update_user(u["id"], **updates)
+    db.add_log(u["username"], "extend", f"+{days}天")
 
 
 def _decorate_user(u: dict) -> dict:
@@ -420,20 +485,7 @@ def extend_user(request: Request, user_id: int, days: int = Form(...)):
     u = db.get_user(user_id)
     if not u:
         return RedirectResponse("/?error=用户不存在", status_code=303)
-    base = u["expire_at"] if u["expire_at"] and u["expire_at"] > int(time.time()) else int(time.time())
-    new_expire = base + days * 86400
-    updates = {"expire_at": new_expire}
-    # 如果用户当前是因到期被禁用的状态，续期后自动恢复启用
-    if u["status"] in ("expired", "disabled") and new_expire > int(time.time()):
-        client = _get_client_or_none()
-        try:
-            if client:
-                client.set_disabled(u["emby_user_id"], False)
-            updates["status"] = "active"
-        except EmbyError:
-            pass
-    db.update_user(user_id, **updates)
-    db.add_log(u["username"], "extend", f"+{days}天")
+    _do_extend(u, days)
     return RedirectResponse(f"/?msg=已为 {u['username']} 续期 {days} 天", status_code=303)
 
 
@@ -445,12 +497,8 @@ def disable_user(request: Request, user_id: int):
     u = db.get_user(user_id)
     if not u:
         return RedirectResponse("/?error=用户不存在", status_code=303)
-    client = _get_client_or_none()
     try:
-        if client:
-            client.set_disabled(u["emby_user_id"], True)
-        db.update_user(user_id, status="disabled")
-        db.add_log(u["username"], "manual_disable", "")
+        _do_disable(u)
     except EmbyError as e:
         return RedirectResponse(f"/?error=停用失败: {e}", status_code=303)
     return RedirectResponse(f"/?msg=已停用 {u['username']}", status_code=303)
@@ -464,12 +512,8 @@ def enable_user(request: Request, user_id: int):
     u = db.get_user(user_id)
     if not u:
         return RedirectResponse("/?error=用户不存在", status_code=303)
-    client = _get_client_or_none()
     try:
-        if client:
-            client.set_disabled(u["emby_user_id"], False)
-        db.update_user(user_id, status="active")
-        db.add_log(u["username"], "manual_enable", "")
+        _do_enable(u)
     except EmbyError as e:
         return RedirectResponse(f"/?error=启用失败: {e}", status_code=303)
     return RedirectResponse(f"/?msg=已启用 {u['username']}", status_code=303)
@@ -483,15 +527,178 @@ def delete_user(request: Request, user_id: int):
     u = db.get_user(user_id)
     if not u:
         return RedirectResponse("/?error=用户不存在", status_code=303)
-    client = _get_client_or_none()
     try:
-        if client:
-            client.delete_user(u["emby_user_id"])
-        db.delete_user_row(user_id)
-        db.add_log(u["username"], "delete", "")
+        _do_delete(u)
     except EmbyError as e:
         return RedirectResponse(f"/?error=删除失败: {e}", status_code=303)
     return RedirectResponse(f"/?msg=已删除 {u['username']}", status_code=303)
+
+
+# ---------------- 批量操作 ----------------
+
+@app.get("/users/batch-new", response_class=HTMLResponse)
+def batch_new_page(request: Request):
+    guard = _guard(request)
+    if guard:
+        return guard
+    client = _get_client_or_none()
+    libraries, error = [], ""
+    if client:
+        try:
+            libraries = client.list_libraries()
+        except EmbyError as e:
+            error = str(e)
+    else:
+        error = "尚未配置 Emby 连接信息，请先前往设置页面配置"
+    return render(request, "batch_new.html", libraries=libraries, error=error,
+                  results=None, form=None)
+
+
+@app.post("/users/batch-new", response_class=HTMLResponse)
+def batch_create_users(
+    request: Request,
+    usernames: str = Form(...),
+    password_mode: str = Form("random"),
+    fixed_password: str = Form(""),
+    note: str = Form(""),
+    duration_preset: str = Form(""),
+    expire_date: str = Form(""),
+    library_ids: list = Form([]),
+    enable_download: str = Form(None),
+    enable_download_transcode: str = Form(None),
+    enable_upload: str = Form(None),
+):
+    guard = _guard(request)
+    if guard:
+        return guard
+
+    client = _get_client_or_none()
+    if not client:
+        return RedirectResponse("/settings?error=请先配置Emby连接信息", status_code=303)
+
+    expire_at = _calc_expire_at(duration_preset, expire_date)
+
+    # 一行一个用户名，去空行、去重（保持顺序）
+    seen = set()
+    names = []
+    for line in usernames.splitlines():
+        name = line.strip()
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+
+    results = []
+    for username in names:
+        password = (
+            fixed_password if password_mode == "fixed" and fixed_password
+            else _gen_random_password()
+        )
+        try:
+            emby_user = client.create_user(username)
+            emby_id = emby_user["Id"]
+            client.set_password(emby_id, password)
+            client.set_libraries_and_permissions(
+                emby_id, library_ids, bool(enable_download),
+                bool(enable_download_transcode), bool(enable_upload),
+            )
+            db.add_user(
+                emby_user_id=emby_id, username=username, expire_at=expire_at,
+                library_ids=library_ids, enable_download=bool(enable_download),
+                enable_download_transcode=bool(enable_download_transcode),
+                enable_upload=bool(enable_upload), note=note,
+            )
+            db.add_log(username, "create", f"批量创建 expire_at={expire_at}")
+            results.append({"username": username, "password": password,
+                             "ok": True, "message": "创建成功"})
+        except EmbyError as e:
+            results.append({"username": username, "password": "",
+                             "ok": False, "message": str(e)})
+
+    try:
+        libraries = client.list_libraries()
+    except EmbyError:
+        libraries = []
+    ok_count = sum(1 for r in results if r["ok"])
+    return render(request, "batch_new.html", libraries=libraries, error="",
+                  results=results, ok_count=ok_count, total_count=len(results),
+                  form=None)
+
+
+@app.post("/users/batch-extend")
+def batch_extend_users(request: Request, user_ids: list = Form([]), days: int = Form(...)):
+    guard = _guard(request)
+    if guard:
+        return guard
+    ok, fail = 0, 0
+    for uid in user_ids:
+        u = db.get_user(int(uid))
+        if not u:
+            fail += 1
+            continue
+        _do_extend(u, days)
+        ok += 1
+    msg = f"批量续期完成：成功 {ok} 个" + (f"，失败 {fail} 个" if fail else "")
+    return RedirectResponse(f"/?msg={msg}", status_code=303)
+
+
+@app.post("/users/batch-disable")
+def batch_disable_users(request: Request, user_ids: list = Form([])):
+    guard = _guard(request)
+    if guard:
+        return guard
+    ok, fail = 0, 0
+    for uid in user_ids:
+        u = db.get_user(int(uid))
+        if not u:
+            fail += 1
+            continue
+        try:
+            _do_disable(u)
+            ok += 1
+        except EmbyError:
+            fail += 1
+    msg = f"批量停用完成：成功 {ok} 个" + (f"，失败 {fail} 个" if fail else "")
+    return RedirectResponse(f"/?msg={msg}", status_code=303)
+
+
+@app.post("/users/batch-enable")
+def batch_enable_users(request: Request, user_ids: list = Form([])):
+    guard = _guard(request)
+    if guard:
+        return guard
+    ok, fail = 0, 0
+    for uid in user_ids:
+        u = db.get_user(int(uid))
+        if not u:
+            fail += 1
+            continue
+        try:
+            _do_enable(u)
+            ok += 1
+        except EmbyError:
+            fail += 1
+    msg = f"批量启用完成：成功 {ok} 个" + (f"，失败 {fail} 个" if fail else "")
+    return RedirectResponse(f"/?msg={msg}", status_code=303)
+
+
+@app.post("/users/batch-delete")
+def batch_delete_users(request: Request, user_ids: list = Form([])):
+    guard = _guard(request)
+    if guard:
+        return guard
+    ok, fail = 0, 0
+    for uid in user_ids:
+        u = db.get_user(int(uid))
+        if not u:
+            fail += 1
+            continue
+        try:
+            _do_delete(u)
+            ok += 1
+        except EmbyError:
+            fail += 1
+    msg = f"批量删除完成：成功 {ok} 个" + (f"，失败 {fail} 个" if fail else "")
+    return RedirectResponse(f"/?msg={msg}", status_code=303)
 
 
 # ---------------- 设置 ----------------

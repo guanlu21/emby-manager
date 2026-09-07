@@ -76,10 +76,21 @@ class EmbyClient:
     def update_policy(self, emby_user_id: str, policy_patch: dict):
         """
         Emby 要求 POST 完整 Policy 对象，因此先取当前 Policy 再合并覆盖。
+
+        重要坑点（已在 Emby 官方论坛得到确认，见
+        https://emby.media/community/topic/130313-seting-user-library-access-from-api/）：
+        GET /Users/{id} 返回的 Policy 里会带一个 "BlockedMediaFolders": []
+        字段，如果原样把它 POST 回去，Emby 服务端会出现"页面/接口显示已经
+        保存成 EnabledFolders 指定的几个库，但实际用客户端登录该账号时却
+        仍然能看到全部媒体库"的经典 bug —— 也就是设置在管理端看起来生效了，
+        真正生效的库权限却没变。去掉这个字段（不要发送它，而不是发送空
+        数组）就能让 EnabledFolders 真正生效。因此这里在合并完 patch 之后，
+        统一把这个字段从要提交的 Policy 里剔除。
         """
         user = self.get_user(emby_user_id)
         policy = user.get("Policy", {}) or {}
         policy.update(policy_patch)
+        policy.pop("BlockedMediaFolders", None)
         self._request("POST", f"/Users/{emby_user_id}/Policy", json=policy)
         return policy
 

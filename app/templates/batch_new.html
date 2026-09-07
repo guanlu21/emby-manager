@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-head">
+  <h2>批量创建用户</h2>
+  <a class="btn" href="/">返回列表</a>
+</div>
+
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+{% if results is not none %}
+<div class="card" style="max-width:900px">
+  <h3>批量创建结果：成功 {{ ok_count }} / {{ total_count }}</h3>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>用户名</th>
+        <th>初始密码</th>
+        <th>结果</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+      <tr class="{{ '' if r.ok else 'row-danger' }}">
+        <td data-label="用户名"><b>{{ r.username }}</b></td>
+        <td data-label="初始密码">{% if r.password %}<code>{{ r.password }}</code>{% else %}-{% endif %}</td>
+        <td data-label="结果">
+          {% if r.ok %}<span class="badge-ok">✅ {{ r.message }}</span>
+          {% else %}<span class="badge-danger">❌ {{ r.message }}</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted small">密码只会在这里显示一次，请及时复制保存/发给用户，页面刷新后不能再次查看明文密码。</p>
+</div>
+{% endif %}
+
+<form class="card" method="post" action="/users/batch-new" style="max-width:900px">
+  <label>用户名列表（一行一个，重复的会自动去重）</label>
+  <textarea name="usernames" rows="6" required placeholder="例如：
+user01
+user02
+user03" style="width:100%; padding:9px 10px; border:1px solid var(--border); border-radius:6px; font-size:14px; font-family:inherit"></textarea>
+
+  <label>密码方式</label>
+  <div class="row-inline">
+    <label class="checkbox">
+      <input type="radio" name="password_mode" value="random" checked onchange="onPwdModeChange()">
+      为每个用户随机生成密码（创建后在结果里显示，推荐）
+    </label>
+  </div>
+  <div class="row-inline">
+    <label class="checkbox">
+      <input type="radio" name="password_mode" value="fixed" onchange="onPwdModeChange()">
+      统一使用同一个密码
+    </label>
+  </div>
+  <input type="text" name="fixed_password" id="fixed_password_input" placeholder="统一密码" style="display:none; margin-top:6px">
+
+  <label>备注（可选，会应用到本批次所有用户）</label>
+  <input type="text" name="note" value="">
+
+  <label>使用期限</label>
+  <div class="row-inline">
+    <select name="duration_preset" id="duration_preset" onchange="onDurationPresetChange()">
+      <option value="">永久（不设置到期时间）</option>
+      <option value="7">7 天</option>
+      <option value="30" selected>30 天</option>
+      <option value="90">90 天</option>
+      <option value="365">365 天</option>
+      <option value="custom">自定义日期</option>
+    </select>
+    <input type="date" name="expire_date" id="expire_date_input" style="display:none">
+  </div>
+  <p class="muted small">从创建时刻起计算，本批次所有用户使用相同的到期时间。</p>
+
+  <label>可访问的媒体库（本批次所有用户使用相同的媒体库权限）</label>
+  <div class="row-inline" style="margin-bottom:6px">
+    <button type="button" class="btn small" onclick="setAllLibs(true)">全选</button>
+    <button type="button" class="btn small" onclick="setAllLibs(false)">全不选</button>
+    <button type="button" class="btn small" onclick="invertLibs()">反选</button>
+  </div>
+  <div class="lib-list" id="lib-list">
+    {% for lib in libraries %}
+    <label class="checkbox">
+      <input type="checkbox" name="library_ids" value="{{ lib.Id }}">
+      {{ lib.Name }}
+    </label>
+    {% else %}
+    <p class="muted">未能获取媒体库列表，请检查「设置」中的 Emby 连接信息。</p>
+    {% endfor %}
+  </div>
+
+  <label>下载权限</label>
+  <div class="row-inline">
+    <label class="checkbox">
+      <input type="checkbox" name="enable_download">
+      允许下载
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="enable_download_transcode">
+      允许下载需要转码的媒体
+    </label>
+  </div>
+
+  <label>其他权限</label>
+  <div class="row-inline">
+    <label class="checkbox">
+      <input type="checkbox" name="enable_upload">
+      允许上传 (相机上传)
+    </label>
+  </div>
+  <p class="muted small">电视直播 / 直播录制管理会统一强制关闭，不在此处提供开关。</p>
+
+  <button type="submit" class="btn primary">批量创建</button>
+</form>
+
+<script>
+function onPwdModeChange(){
+  const mode = document.querySelector('input[name=password_mode]:checked').value;
+  document.getElementById('fixed_password_input').style.display = mode === 'fixed' ? 'inline-block' : 'none';
+}
+function onDurationPresetChange(){
+  const sel = document.getElementById('duration_preset');
+  const dateInput = document.getElementById('expire_date_input');
+  dateInput.style.display = sel.value === 'custom' ? 'inline-block' : 'none';
+}
+function setAllLibs(checked){
+  document.querySelectorAll('#lib-list input[type=checkbox]').forEach(cb => cb.checked = checked);
+}
+function invertLibs(){
+  document.querySelectorAll('#lib-list input[type=checkbox]').forEach(cb => cb.checked = !cb.checked);
+}
+</script>
+{% endblock %}
