@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}导入已有用户{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <h2>导入已有 Emby 用户</h2>
+  <a class="btn" href="/">返回列表</a>
+</div>
+
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<form class="row-inline" method="get" action="/users/import" style="margin-bottom:16px">
+  <input type="text" name="q" placeholder="按 Emby 用户名搜索" value="{{ q }}" style="max-width:260px">
+  <button type="submit" class="btn">搜索</button>
+</form>
+
+<p class="muted small">下面列出的是 Emby 里已存在、但还没有被本工具接管的用户（已经在管理列表里的不会重复显示）。
+点"导入"可以把它纳入统一管理，之后就能在这里设置期限、到期自动停用等。</p>
+
+<table class="table">
+  <thead>
+    <tr>
+      <th>Emby 用户名</th>
+      <th>类型</th>
+      <th>当前媒体库</th>
+      <th>状态</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for c in candidates %}
+    <tr>
+      <td data-label="Emby 用户名"><b>{{ c.name }}</b></td>
+      <td data-label="类型">{{ "管理员" if c.is_admin else "普通用户" }}</td>
+      <td data-label="当前媒体库">
+        {% if c.enable_all_folders %}
+          <span class="badge-warn">不限制（全部）</span>
+        {% elif c.library_names %}
+          {{ c.library_names|join('、') }}
+        {% else %}
+          <span class="muted">无</span>
+        {% endif %}
+      </td>
+      <td data-label="状态">{{ "已禁用" if c.is_disabled else "正常" }}</td>
+      <td data-label="操作" class="actions">
+        <a class="btn small primary" href="/users/import/{{ c.id }}">导入</a>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted center">
+      {% if error %}无法获取 Emby 用户列表{% else %}没有可导入的用户了，Emby 上的用户都已经在管理列表里{% endif %}
+    </td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}

@@ -198,6 +198,139 @@ def create_user(
     return RedirectResponse(f"/?msg=用户 {username} 创建成功", status_code=303)
 
 
+# ---------------- 导入已有 Emby 用户 ----------------
+
+@app.get("/users/import", response_class=HTMLResponse)
+def import_list_page(request: Request, q: str = ""):
+    guard = _guard(request)
+    if guard:
+        return guard
+    client = _get_client_or_none()
+    if not client:
+        return RedirectResponse("/settings?error=请先配置Emby连接信息", status_code=303)
+
+    managed_ids = {u["emby_user_id"] for u in db.list_users()}
+    error = ""
+    candidates = []
+    try:
+        emby_users = client.list_emby_users()
+        libraries = client.list_libraries()
+        lib_name_by_id = {l["Id"]: l["Name"] for l in libraries}
+        for eu in emby_users:
+            if eu.get("Id") in managed_ids:
+                continue
+            name = eu.get("Name", "")
+            if q and q.lower() not in name.lower():
+                continue
+            policy = eu.get("Policy", {}) or {}
+            enabled_ids = policy.get("EnabledFolders") or []
+            lib_names = [lib_name_by_id.get(i, i) for i in enabled_ids]
+            candidates.append({
+                "id": eu.get("Id"),
+                "name": name,
+                "is_admin": policy.get("IsAdministrator", False),
+                "enable_all_folders": policy.get("EnableAllFolders", False),
+                "library_names": lib_names,
+                "is_disabled": policy.get("IsDisabled", False),
+            })
+    except EmbyError as e:
+        error = str(e)
+
+    return render(request, "import_list.html", candidates=candidates, error=error, q=q)
+
+
+@app.get("/users/import/{emby_user_id}", response_class=HTMLResponse)
+def import_user_page(request: Request, emby_user_id: str, error: str = ""):
+    guard = _guard(request)
+    if guard:
+        return guard
+    if db.get_user_by_emby_id(emby_user_id):
+        return RedirectResponse("/?error=该用户已在管理列表中", status_code=303)
+    client = _get_client_or_none()
+    if not client:
+        return RedirectResponse("/settings?error=请先配置Emby连接信息", status_code=303)
+    try:
+        emby_user = client.get_user(emby_user_id)
+        libraries = client.list_libraries()
+    except EmbyError as e:
+        return RedirectResponse(f"/users/import?error={e}", status_code=303)
+
+    policy = emby_user.get("Policy", {}) or {}
+    enable_all = policy.get("EnableAllFolders", False)
+    if enable_all:
+        # 原本不限制媒体库，默认帮它全选，方便管理员直接确认保存
+        selected_lib_ids = [l["Id"] for l in libraries]
+    else:
+        selected_lib_ids = policy.get("EnabledFolders") or []
+
+    fake_user = {
+        "id": None,
+        "username": emby_user.get("Name"),
+        "note": "",
+        "enable_download": policy.get("EnableContentDownloading", False),
+        "enable_download_transcode": policy.get("EnableMediaConversion", False),
+        "enable_upload": policy.get("AllowCameraUpload", False),
+        "expire_date_input": "",
+    }
+
+    return render(request, "user_form.html", mode="import", user=fake_user,
+                  libraries=libraries, selected_lib_ids=selected_lib_ids,
+                  error=error, form=None, live_policy=None,
+                  emby_user_id=emby_user_id, enable_all_folders_hint=enable_all)
+
+
+@app.post("/users/import/{emby_user_id}")
+def do_import_user(
+    request: Request,
+    emby_user_id: str,
+    note: str = Form(""),
+    duration_preset: str = Form(""),
+    expire_date: str = Form(""),
+    library_ids: list = Form([]),
+    enable_download: str = Form(None),
+    enable_download_transcode: str = Form(None),
+    enable_upload: str = Form(None),
+):
+    guard = _guard(request)
+    if guard:
+        return guard
+    if db.get_user_by_emby_id(emby_user_id):
+        return RedirectResponse("/?error=该用户已在管理列表中", status_code=303)
+    client = _get_client_or_none()
+    if not client:
+        return RedirectResponse("/settings?error=请先配置Emby连接信息", status_code=303)
+
+    expire_at = None
+    try:
+        if duration_preset == "custom" and expire_date:
+            dt = datetime.datetime.strptime(expire_date, "%Y-%m-%d")
+            expire_at = int(dt.timestamp())
+        elif duration_preset and duration_preset != "custom":
+            expire_at = int(time.time()) + int(duration_preset) * 86400
+    except ValueError:
+        pass
+
+    username = emby_user_id
+    try:
+        emby_user = client.get_user(emby_user_id)
+        username = emby_user.get("Name")
+        client.set_libraries_and_permissions(
+            emby_user_id, library_ids, bool(enable_download),
+            bool(enable_download_transcode), bool(enable_upload),
+        )
+        db.add_user(
+            emby_user_id=emby_user_id, username=username, expire_at=expire_at,
+            library_ids=library_ids, enable_download=bool(enable_download),
+            enable_download_transcode=bool(enable_download_transcode),
+            enable_upload=bool(enable_upload), note=note,
+        )
+        db.add_log(username, "import", "从已有 Emby 用户导入")
+    except EmbyError as e:
+        return RedirectResponse(f"/users/import/{emby_user_id}?error={e}", status_code=303)
+
+    return RedirectResponse(f"/?msg=已导入用户 {username}", status_code=303)
+
+
 # ---------------- 编辑用户 ----------------
 
 @app.get("/users/{user_id}/edit", response_class=HTMLResponse)
