@@ -29,7 +29,7 @@
       新增加到 Emby 的库默认排在最后。</p>
     <ul class="lib-order-list" id="lib-order-list">
       {% for lib in libraries %}
-      <li draggable="true" data-id="{{ lib.Id }}">
+      <li draggable="true" data-id="{{ lib.Guid or lib.Id }}">
         <span class="drag-handle">☰</span> {{ lib.Name }}
       </li>
       {% endfor %}

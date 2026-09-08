@@ -67,6 +67,7 @@ class EmbyClient:
                 # 才回退到 Id，避免新版本继续提交错误的 Item Id。
                 {
                     "Id": item.get("Guid") or item.get("Id"),
+                    "Guid": item.get("Guid"),
                     # 兼容 Guid 切换前已保存的媒体库排序配置。
                     "LegacyId": item.get("Id"),
                     "Name": item.get("Name"),
@@ -83,6 +84,7 @@ class EmbyClient:
                 lib_id = item.get("Guid") or item.get("Id") or item.get("ItemId")
                 result.append({
                     "Id": lib_id,
+                    "Guid": item.get("Guid"),
                     "LegacyId": item.get("Id") or item.get("ItemId"),
                     "Name": item.get("Name"),
                 })
@@ -102,6 +104,13 @@ class EmbyClient:
             f"/Users/{emby_user_id}/Configuration",
             json=configuration,
         )
+        fresh_configuration = self.get_user(emby_user_id).get("Configuration", {}) or {}
+        actual_order = list(fresh_configuration.get("OrderedViews") or [])
+        if actual_order != list(library_ids):
+            raise EmbyError(
+                f"Emby 用户 {emby_user_id} 的 OrderedViews 写入后不一致，"
+                "网页端媒体库顺序未真正保存，请检查 Emby 版本或接口响应。"
+            )
 
     def get_user(self, emby_user_id):
         resp = self._request("GET", f"/Users/{emby_user_id}")

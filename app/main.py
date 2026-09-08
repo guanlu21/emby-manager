@@ -798,14 +798,33 @@ def save_library_order(request: Request, library_order: str = Form("[]")):
     if not client:
         return RedirectResponse("/settings?error=请先配置Emby连接信息", status_code=303)
     try:
+        # OrderedViews 是 Emby 网页端首页使用的用户配置，必须提交媒体库
+        # Guid；兼容之前保存的旧 Id，统一转换成当前接口返回的 Guid。
+        libraries = client.list_libraries()
+        id_to_guid = {}
+        for library in libraries:
+            guid = library.get("Guid") or library.get("Id")
+            for value in (library.get("Id"), library.get("Guid"), library.get("LegacyId")):
+                if value is not None:
+                    id_to_guid[str(value)] = guid
+        normalized_order = []
+        for value in order:
+            guid = id_to_guid.get(str(value))
+            if guid and guid not in normalized_order:
+                normalized_order.append(guid)
+        # 未纳入旧配置的新媒体库按当前 Emby 列表顺序补到末尾。
+        for library in libraries:
+            guid = library.get("Guid") or library.get("Id")
+            if guid and guid not in normalized_order:
+                normalized_order.append(guid)
         emby_users = client.list_emby_users()
         for emby_user in emby_users:
             emby_user_id = emby_user.get("Id")
             if emby_user_id:
-                client.set_user_library_order(emby_user_id, order)
+                client.set_user_library_order(emby_user_id, normalized_order)
     except EmbyError as e:
         return RedirectResponse(f"/settings?error=同步媒体库顺序到Emby失败: {e}", status_code=303)
-    db.set_setting("library_order", json.dumps(order))
+    db.set_setting("library_order", json.dumps(normalized_order))
     return RedirectResponse(
         f"/settings?msg=媒体库显示顺序已保存并同步到Emby（共{len(emby_users)}个用户）",
         status_code=303,
