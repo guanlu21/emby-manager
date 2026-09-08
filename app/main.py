@@ -800,17 +800,7 @@ def save_library_order(request: Request, library_order: str = Form("[]")):
     try:
         # OrderedViews 是 Emby 网页端首页使用的用户配置，必须提交媒体库
         # Guid；兼容之前保存的旧 Id，统一转换成当前接口返回的 Guid。
-        all_libraries = client.list_libraries(include_unconfigurable=True)
-        libraries = [
-            library for library in all_libraries
-            if library.get("IsUserAccessConfigurable", True)
-        ]
-        hidden_library_ids = [
-            library.get("Guid") or library.get("Id")
-            for library in all_libraries
-            if not library.get("IsUserAccessConfigurable", True)
-            and (library.get("Guid") or library.get("Id"))
-        ]
+        libraries = client.list_libraries()
         id_to_guid = {}
         for library in libraries:
             guid = library.get("Guid") or library.get("Id")
@@ -827,6 +817,7 @@ def save_library_order(request: Request, library_order: str = Form("[]")):
             guid = library.get("Guid") or library.get("Id")
             if guid and guid not in normalized_order:
                 normalized_order.append(guid)
+        hidden_library_ids = client.list_hidden_library_ids()
         emby_users = client.list_emby_users()
         for emby_user in emby_users:
             emby_user_id = emby_user.get("Id")

@@ -40,7 +40,7 @@ class EmbyClient:
         resp = self._request("GET", "/System/Info")
         return resp.json()
 
-    def list_libraries(self, include_unconfigurable=False):
+    def list_libraries(self):
         """
         返回媒体库列表 [{Id, Name}]，这里特意用 /Library/SelectableMediaFolders
         而不是 /Library/VirtualFolders。
@@ -71,10 +71,9 @@ class EmbyClient:
                     # 兼容 Guid 切换前已保存的媒体库排序配置。
                     "LegacyId": item.get("Id"),
                     "Name": item.get("Name"),
-                    "IsUserAccessConfigurable": item.get("IsUserAccessConfigurable", True),
                 }
                 for item in data
-                if include_unconfigurable or item.get("IsUserAccessConfigurable", True)
+                if item.get("IsUserAccessConfigurable", True)
             ]
         except EmbyError:
             # 极老版本 Emby 可能没有这个接口，退回到 VirtualFolders 作为兜底
@@ -95,16 +94,21 @@ class EmbyClient:
         resp = self._request("GET", "/Users")
         return resp.json()
 
+    def list_hidden_library_ids(self):
+        """返回 Emby 标记为不可按用户配置的库（通常是合集）的 Guid。"""
+        resp = self._request("GET", "/Library/SelectableMediaFolders")
+        return [
+            item.get("Guid") or item.get("Id")
+            for item in resp.json()
+            if not item.get("IsUserAccessConfigurable", True)
+            and (item.get("Guid") or item.get("Id"))
+        ]
+
     def set_user_library_order(self, emby_user_id, library_ids, hidden_library_ids=None):
-        """写入媒体库顺序，并隐藏指定库（如合集），供客户端读取。"""
+        """写入媒体库顺序，并隐藏指定库（如合集）。"""
         user = self.get_user(emby_user_id)
         configuration = dict(user.get("Configuration", {}) or {})
         configuration["OrderedViews"] = list(library_ids)
-        hidden = list(configuration.get("MyMediaExcludes") or [])
-        for library_id in hidden_library_ids or []:
-            if library_id not in hidden:
-                hidden.append(library_id)
-        configuration["MyMediaExcludes"] = hidden
         self._request(
             "POST",
             f"/Users/{emby_user_id}/Configuration",
