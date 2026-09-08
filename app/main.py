@@ -93,14 +93,27 @@ def _get_client_or_none():
     return EmbyClient(url, key)
 
 
+def _end_of_day_ts(date_str: str) -> int:
+    """
+    把"YYYY-MM-DD"这种到期日期解析成"当天 23:59:59"的时间戳。
+
+    坑点：之前直接 strptime 出来是"当天 00:00:00"，导致到期当天一开始
+    （只要过了 0 点）就已经算作"过期"，页面上剩余天数会显示成负数——
+    但实际应该是"到期当天仍然算有效，过完这一天之后才算过期"，所以这里
+    统一取当天的最后一秒，而不是最开始一秒。
+    """
+    dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
+    dt = dt.replace(hour=23, minute=59, second=59)
+    return int(dt.timestamp())
+
+
 def _calc_expire_at(duration_preset: str, expire_date: str, base_ts: int = None):
     """
     统一计算到期时间戳。duration_preset 为空字符串代表"永久"（返回 None）。
     """
     try:
         if duration_preset == "custom" and expire_date:
-            dt = datetime.datetime.strptime(expire_date, "%Y-%m-%d")
-            return int(dt.timestamp())
+            return _end_of_day_ts(expire_date)
         elif duration_preset and duration_preset != "custom":
             base = base_ts if base_ts is not None else int(time.time())
             return base + int(duration_preset) * 86400
@@ -230,8 +243,7 @@ def create_user(
     expire_at = None
     try:
         if duration_preset == "custom" and expire_date:
-            dt = datetime.datetime.strptime(expire_date, "%Y-%m-%d")
-            expire_at = int(dt.timestamp())
+            expire_at = _end_of_day_ts(expire_date)
         elif duration_preset and duration_preset != "custom":
             expire_at = int(time.time()) + int(duration_preset) * 86400
     except ValueError:
@@ -368,8 +380,7 @@ def do_import_user(
     expire_at = None
     try:
         if duration_preset == "custom" and expire_date:
-            dt = datetime.datetime.strptime(expire_date, "%Y-%m-%d")
-            expire_at = int(dt.timestamp())
+            expire_at = _end_of_day_ts(expire_date)
         elif duration_preset and duration_preset != "custom":
             expire_at = int(time.time()) + int(duration_preset) * 86400
     except ValueError:
@@ -451,8 +462,7 @@ def update_user(
     expire_at = u["expire_at"]
     try:
         if duration_preset == "custom" and expire_date:
-            dt = datetime.datetime.strptime(expire_date, "%Y-%m-%d")
-            expire_at = int(dt.timestamp())
+            expire_at = _end_of_day_ts(expire_date)
         elif duration_preset == "":
             expire_at = None
         elif duration_preset:

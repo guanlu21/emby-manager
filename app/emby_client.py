@@ -124,6 +124,18 @@ class EmbyClient:
         self, emby_user_id, library_ids, enable_download,
         enable_download_transcoded, enable_upload,
     ):
+        """
+        写入媒体库/权限后，立刻重新从 Emby 拉一次该用户的 Policy 做校验，
+        确认真的生效了，而不是"接口返回 200 就当作成功"。
+
+        背景：管理端这里保存成功（HTTP 200，无异常）不等于 Emby 服务端真的
+        应用了这次修改——历史上已经踩过 BlockedMediaFolders 字段导致"看起来
+        保存成功、实际权限没变"的坑（见 update_policy 里的说明），不排除还
+        有其它类似情况（比如某些 Emby 版本对未知/失效的库 Id 静默忽略、或者
+        对 EnabledFolders 有额外的服务端校验）。与其让管理员在页面上看到
+        "修改成功"之后还要手动点进「Emby 实时校验」去确认，这里直接在保存
+        这一步就做同样的校验，不一致就当作失败抛出来，把问题原样暴露出去。
+        """
         patch = {
             "EnableAllFolders": False,
             "EnabledFolders": list(library_ids),
@@ -136,7 +148,30 @@ class EmbyClient:
             "EnableLiveTvAccess": False,
             "EnableLiveTvManagement": False,
         }
-        return self.update_policy(emby_user_id, patch)
+        result = self.update_policy(emby_user_id, patch)
+
+        # 保存后立即重新读取一次，校验真实生效的状态和刚才提交的是否一致
+        fresh_policy = self.get_user(emby_user_id).get("Policy", {}) or {}
+        actual_ids = set(fresh_policy.get("EnabledFolders") or [])
+        expected_ids = set(library_ids)
+        if fresh_policy.get("EnableAllFolders"):
+            raise EmbyError(
+                "已提交媒体库设置，但重新读取 Emby 发现 EnableAllFolders 仍为 True"
+                "（不限制媒体库），保存没有真正生效，请重试或检查 Emby 服务端日志。"
+            )
+        if actual_ids != expected_ids:
+            missing = expected_ids - actual_ids
+            extra = actual_ids - expected_ids
+            detail = []
+            if missing:
+                detail.append(f"缺少: {sorted(missing)}")
+            if extra:
+                detail.append(f"多出: {sorted(extra)}")
+            raise EmbyError(
+                "已提交媒体库设置，但重新读取 Emby 后发现实际生效的 EnabledFolders "
+                f"和提交的不一致（{'; '.join(detail)}），保存没有真正生效，请重试。"
+            )
+        return result
 
     def get_effective_policy_summary(self, emby_user_id, libraries):
         """
