@@ -122,6 +122,20 @@ def _calc_expire_at(duration_preset: str, expire_date: str, base_ts: int = None)
     return None
 
 
+def _apply_library_order(libraries: list) -> list:
+    """
+    按管理员在「设置」页里自定义的顺序，对媒体库列表重新排序，用于新建/
+    编辑/批量创建/导入用户页面的勾选列表展示。
+
+    没有配置过顺序、或者是 Emby 那边新增加的库（还没被纳入自定义顺序）时，
+    保持 Emby 接口原本返回的相对顺序，统一追加在已排好序的库后面（不会
+    插到中间，也不会丢）。
+    """
+    order = json.loads(db.get_setting("library_order") or "[]")
+    order_index = {lib_id: i for i, lib_id in enumerate(order)}
+    return sorted(libraries, key=lambda lib: order_index.get(lib.get("Id"), len(order)))
+
+
 _PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 
@@ -209,7 +223,7 @@ def new_user_page(request: Request):
     libraries, error = [], ""
     if client:
         try:
-            libraries = client.list_libraries()
+            libraries = _apply_library_order(client.list_libraries())
         except EmbyError as e:
             error = str(e)
     else:
@@ -266,7 +280,7 @@ def create_user(
         db.add_log(username, "create", f"expire_at={expire_at}")
     except EmbyError as e:
         client2 = _get_client_or_none()
-        libraries = client2.list_libraries() if client2 else []
+        libraries = _apply_library_order(client2.list_libraries()) if client2 else []
         return render(request, "user_form.html", mode="new", user=None, libraries=libraries,
                       selected_lib_ids=library_ids, error=f"创建失败: {e}",
                       form={"username": username, "password": password, "note": note},
@@ -291,7 +305,7 @@ def import_list_page(request: Request, q: str = ""):
     candidates = []
     try:
         emby_users = client.list_emby_users()
-        libraries = client.list_libraries()
+        libraries = _apply_library_order(client.list_libraries())
         lib_name_by_id = {l["Id"]: l["Name"] for l in libraries}
         for eu in emby_users:
             if eu.get("Id") in managed_ids:
@@ -328,7 +342,7 @@ def import_user_page(request: Request, emby_user_id: str, error: str = ""):
         return RedirectResponse("/settings?error=请先配置Emby连接信息", status_code=303)
     try:
         emby_user = client.get_user(emby_user_id)
-        libraries = client.list_libraries()
+        libraries = _apply_library_order(client.list_libraries())
     except EmbyError as e:
         return RedirectResponse(f"/users/import?error={e}", status_code=303)
 
@@ -426,7 +440,7 @@ def edit_user_page(request: Request, user_id: int, error: str = ""):
     selected_lib_ids = u["library_ids"]
     if client:
         try:
-            libraries = client.list_libraries()
+            libraries = _apply_library_order(client.list_libraries())
         except EmbyError as e:
             error = str(e)
         try:
@@ -561,7 +575,7 @@ def batch_new_page(request: Request):
     libraries, error = [], ""
     if client:
         try:
-            libraries = client.list_libraries()
+            libraries = _apply_library_order(client.list_libraries())
         except EmbyError as e:
             error = str(e)
     else:
@@ -631,7 +645,7 @@ def batch_create_users(
                              "ok": False, "message": str(e)})
 
     try:
-        libraries = client.list_libraries()
+        libraries = _apply_library_order(client.list_libraries())
     except EmbyError:
         libraries = []
     ok_count = sum(1 for r in results if r["ok"])
@@ -724,7 +738,30 @@ def settings_page(request: Request, msg: str = "", error: str = ""):
     guard = _guard(request)
     if guard:
         return guard
-    return render(request, "settings.html", settings=db.get_all_settings(), msg=msg, error=error)
+    client = _get_client_or_none()
+    libraries, lib_error = [], ""
+    if client:
+        try:
+            libraries = _apply_library_order(client.list_libraries())
+        except EmbyError as e:
+            lib_error = str(e)
+    return render(request, "settings.html", settings=db.get_all_settings(),
+                  msg=msg, error=error, libraries=libraries, lib_error=lib_error)
+
+
+@app.post("/settings/library-order")
+def save_library_order(request: Request, library_order: str = Form("[]")):
+    guard = _guard(request)
+    if guard:
+        return guard
+    try:
+        order = json.loads(library_order)
+        if not isinstance(order, list):
+            raise ValueError
+    except ValueError:
+        return RedirectResponse("/settings?error=排序数据格式不对", status_code=303)
+    db.set_setting("library_order", json.dumps(order))
+    return RedirectResponse("/settings?msg=媒体库显示顺序已保存", status_code=303)
 
 
 @app.post("/settings/emby")

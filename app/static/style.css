@@ -28,6 +28,11 @@ input[type=text], input[type=password], input[type=date], select{
 .checkbox{display:flex; align-items:center; gap:6px; font-size:14px; color:var(--text); margin:6px 0}
 .checkbox input{width:auto}
 .lib-list{border:1px solid var(--border); border-radius:6px; padding:10px 14px; margin-top:6px; max-height:220px; overflow:auto}
+.lib-order-list{list-style:none; margin:6px 0 0; padding:0; border:1px solid var(--border); border-radius:6px; max-height:320px; overflow:auto}
+.lib-order-list li{display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--border); cursor:grab; background:var(--card); user-select:none}
+.lib-order-list li:last-child{border-bottom:none}
+.lib-order-list li.dragging{opacity:.4}
+.lib-order-list .drag-handle{color:var(--muted); font-size:14px}
 .btn{
   display:inline-block; padding:8px 16px; border-radius:6px; border:1px solid var(--border);
   background:#fff; color:var(--text); text-decoration:none; cursor:pointer; font-size:14px;

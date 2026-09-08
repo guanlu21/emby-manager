@@ -104,19 +104,24 @@ class EmbyClient:
         Emby 要求 POST 完整 Policy 对象，因此先取当前 Policy 再合并覆盖。
 
         重要坑点（已在 Emby 官方论坛得到确认，见
-        https://emby.media/community/topic/130313-seting-user-library-access-from-api/）：
-        GET /Users/{id} 返回的 Policy 里会带一个 "BlockedMediaFolders": []
-        字段，如果原样把它 POST 回去，Emby 服务端会出现"页面/接口显示已经
-        保存成 EnabledFolders 指定的几个库，但实际用客户端登录该账号时却
-        仍然能看到全部媒体库"的经典 bug —— 也就是设置在管理端看起来生效了，
-        真正生效的库权限却没变。去掉这个字段（不要发送它，而不是发送空
-        数组）就能让 EnabledFolders 真正生效。因此这里在合并完 patch 之后，
-        统一把这个字段从要提交的 Policy 里剔除。
+        https://emby.media/community/topic/130313-seting-user-library-access-from-api/，
+        并且用抓包比对过管理后台网页版真正保存时发出的请求体，实测确认）：
+        如果原样把 GET /Users/{id} 返回的 "BlockedMediaFolders" 字段 POST
+        回去，Emby 服务端会出现"页面/接口显示已经保存成 EnabledFolders 指定
+        的几个库，但实际用客户端登录该账号、甚至打开管理后台该用户的访问
+        页面时，媒体库勾选框却仍是空的"这个经典 bug——也就是保存看起来成
+        功、GET 读回来也显示已生效，但真正生效的库权限其实没变。
+
+        一开始按论坛的说法把这个字段整个从 JSON 里删掉（不发送），结果发现
+        还是没用；后来抓包对比管理后台网页版保存时真正发出去的请求体，
+        发现它是显式发送 "BlockedMediaFolders": null（而不是完全不带这个
+        字段），这样服务端才会正确处理。所以这里统一显式把这个字段设为
+        None（对应 JSON 里的 null），而不是用 pop() 整个去掉。
         """
         user = self.get_user(emby_user_id)
         policy = user.get("Policy", {}) or {}
         policy.update(policy_patch)
-        policy.pop("BlockedMediaFolders", None)
+        policy["BlockedMediaFolders"] = None
         self._request("POST", f"/Users/{emby_user_id}/Policy", json=policy)
         return policy
 

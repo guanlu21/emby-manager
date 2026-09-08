@@ -19,6 +19,29 @@
 </div>
 
 <div class="card">
+  <h3>媒体库显示顺序</h3>
+  {% if lib_error %}
+    <p class="muted">无法从 Emby 读取媒体库列表：{{ lib_error }}</p>
+  {% elif not libraries %}
+    <p class="muted">暂无媒体库，请先确认「Emby 服务器连接」配置正确。</p>
+  {% else %}
+    <p class="muted small">拖动下面的库调整顺序，新建/编辑用户等页面的媒体库勾选列表会按这个顺序显示。
+      新增加到 Emby 的库默认排在最后。</p>
+    <ul class="lib-order-list" id="lib-order-list">
+      {% for lib in libraries %}
+      <li draggable="true" data-id="{{ lib.Id }}">
+        <span class="drag-handle">☰</span> {{ lib.Name }}
+      </li>
+      {% endfor %}
+    </ul>
+    <form method="post" action="/settings/library-order" id="lib-order-form">
+      <input type="hidden" name="library_order" id="lib-order-input">
+      <button type="submit" class="btn primary" style="margin-top:10px">保存顺序</button>
+    </form>
+  {% endif %}
+</div>
+
+<div class="card">
   <h3>青龙面板通知对接</h3>
   <p class="muted">在青龙面板中新建一个定时任务，调用下面的接口获取「即将到期」和「今日到期」的用户名单，
   然后用青龙自带的 <code>sendNotify</code> 发送通知。示例脚本见下载包中的 <code>qinglong_notify_example.js</code>。</p>
@@ -50,5 +73,48 @@ function copyToken(){
   document.execCommand('copy');
   alert('已复制到剪贴板');
 }
+
+// 媒体库排序：原生 HTML5 拖拽，不依赖额外的库
+(function(){
+  const list = document.getElementById('lib-order-list');
+  if (!list) return;
+  let dragging = null;
+
+  list.addEventListener('dragstart', (e) => {
+    dragging = e.target.closest('li');
+    dragging.classList.add('dragging');
+  });
+  list.addEventListener('dragend', () => {
+    if (dragging) dragging.classList.remove('dragging');
+    dragging = null;
+  });
+  list.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    const after = getAfterElement(list, e.clientY);
+    if (!dragging) return;
+    if (after == null) {
+      list.appendChild(dragging);
+    } else {
+      list.insertBefore(dragging, after);
+    }
+  });
+
+  function getAfterElement(container, y){
+    const items = [...container.querySelectorAll('li:not(.dragging)')];
+    return items.reduce((closest, child) => {
+      const box = child.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      if (offset < 0 && offset > closest.offset) {
+        return { offset, element: child };
+      }
+      return closest;
+    }, { offset: Number.NEGATIVE_INFINITY, element: null }).element;
+  }
+
+  document.getElementById('lib-order-form').addEventListener('submit', () => {
+    const ids = [...list.querySelectorAll('li')].map(li => li.dataset.id);
+    document.getElementById('lib-order-input').value = JSON.stringify(ids);
+  });
+})();
 </script>
 {% endblock %}
