@@ -46,14 +46,12 @@ class EmbyClient:
         而不是 /Library/VirtualFolders。
 
         排查过程记录（重要，别改回 VirtualFolders）：
-        /Library/VirtualFolders 是管理端"媒体库管理"页面在用的接口，它返回的
-        "Id"/"ItemId" 有时候跟真正用于 /Users/{id}/Policy 里 EnabledFolders
-        字段匹配所需要的 Id 对不上（具体哪些库会对不上、什么情况下对不上，
-        没有很稳定的规律，实测出现过"勾选了 8 个库，保存后客户端却只能看到
-        其中 1 个"这种情况）。
+        Emby 的 /Users/{id}/Policy 使用的是媒体库 Guid，而不是页面树节点的
+        Item Id。SelectableMediaFolders 同时返回 Id 和 Guid；这里统一把 Guid
+        暴露为本程序内部的 Id，避免把错误的 Item Id 写入 EnabledFolders。
         而 /Library/SelectableMediaFolders 才是 Emby 官方"设置用户媒体库访问
         权限"专用的接口（官方文档字段里带有 IsUserAccessConfigurable），
-        返回的 Id 就是可以直接放进 EnabledFolders 里、能保证生效的 Id。
+        返回的 Guid 才是可以直接放进 EnabledFolders 里、能保证生效的值。
 
         另外这个接口返回的每一项都带 IsUserAccessConfigurable 字段：为
         false 表示这个"库"（常见于 合集/Collections 这类聚合视图）本身就
@@ -65,7 +63,9 @@ class EmbyClient:
             resp = self._request("GET", "/Library/SelectableMediaFolders")
             data = resp.json()
             return [
-                {"Id": item.get("Id"), "Name": item.get("Name")}
+                # EnabledFolders 要求 Guid。只有极老版本未返回 Guid 时，
+                # 才回退到 Id，避免新版本继续提交错误的 Item Id。
+                {"Id": item.get("Guid") or item.get("Id"), "Name": item.get("Name")}
                 for item in data
                 if item.get("IsUserAccessConfigurable", True)
             ]
@@ -75,7 +75,7 @@ class EmbyClient:
             data = resp.json()
             result = []
             for item in data:
-                lib_id = item.get("Id") or item.get("ItemId")
+                lib_id = item.get("Guid") or item.get("Id") or item.get("ItemId")
                 result.append({"Id": lib_id, "Name": item.get("Name")})
             return result
 

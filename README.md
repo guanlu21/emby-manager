@@ -117,10 +117,10 @@ Emby 本身不是网盘类应用，没有普适的"用户上传媒体文件"功�
      看到全部库"的问题（[Emby 官方论坛讨论](https://emby.media/community/topic/130313-seting-user-library-access-from-api/)）。
      现在提交 Policy 前会自动去掉这个字段（不能发送为空值或 `null`）。
   2. 获取媒体库 Id 用错了接口：之前用的是 `/Library/VirtualFolders`（管理端"媒体库管理"页面用的
-     接口），它返回的 Id 有时候和真正写进 `EnabledFolders` 里能生效的 Id 对不上，实测出现过"勾选了
+     接口），其 `Id` 是媒体库页面树的 Item Id，而真正写进 `EnabledFolders` 里能生效的是媒体库的 `Guid`，实测出现过"勾选了
      8 个库，保存后客户端却只能看到其中 1 个（还常常是"合集"这种本来就不支持按用户限制、对所有人
      都可见的聚合库）"的情况。现在改用 Emby 官方专门给"设置用户媒体库访问权限"用的接口
-     `/Library/SelectableMediaFolders`，返回的 Id 才是能正确生效的。这个接口也会标记哪些库本来就
+     `/Library/SelectableMediaFolders`，现在使用该接口返回的 `Guid` 才能正确生效。这个接口也会标记哪些库本来就
      不支持按用户限制（比如 合集/Collections），这类库现在不会出现在勾选列表里，因为勾不勾都没用。
   上面两个坑修好之后，**之前受影响的老账号需要进「编辑用户」重新勾选一遍媒体库、点「保存修改」，
   才能用新的正确 Id 重新提交一次 Policy**（编辑页面现在会优先显示 Emby 里实时的真实勾选状态，
