@@ -94,18 +94,8 @@ class EmbyClient:
         resp = self._request("GET", "/Users")
         return resp.json()
 
-    def list_hidden_library_ids(self):
-        """返回 Emby 标记为不可按用户配置的库（通常是合集）的 Guid。"""
-        resp = self._request("GET", "/Library/SelectableMediaFolders")
-        return [
-            item.get("Guid") or item.get("Id")
-            for item in resp.json()
-            if not item.get("IsUserAccessConfigurable", True)
-            and (item.get("Guid") or item.get("Id"))
-        ]
-
-    def set_user_library_order(self, emby_user_id, library_ids, hidden_library_ids=None):
-        """写入媒体库顺序，并隐藏指定库（如合集）。"""
+    def set_user_library_order(self, emby_user_id, library_ids):
+        """把媒体库顺序写入 Emby 用户配置，供 Web/Vidhub 等客户端读取。"""
         user = self.get_user(emby_user_id)
         configuration = dict(user.get("Configuration", {}) or {})
         configuration["OrderedViews"] = list(library_ids)
@@ -120,12 +110,6 @@ class EmbyClient:
             raise EmbyError(
                 f"Emby 用户 {emby_user_id} 的 OrderedViews 写入后不一致，"
                 "网页端媒体库顺序未真正保存，请检查 Emby 版本或接口响应。"
-            )
-        actual_hidden = set(fresh_configuration.get("MyMediaExcludes") or [])
-        if not set(hidden_library_ids or []).issubset(actual_hidden):
-            raise EmbyError(
-                f"Emby 用户 {emby_user_id} 的合集隐藏设置写入后不一致，"
-                "请检查 Emby 版本或接口响应。"
             )
 
     def get_user(self, emby_user_id):

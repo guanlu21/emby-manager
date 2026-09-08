@@ -817,14 +817,11 @@ def save_library_order(request: Request, library_order: str = Form("[]")):
             guid = library.get("Guid") or library.get("Id")
             if guid and guid not in normalized_order:
                 normalized_order.append(guid)
-        hidden_library_ids = client.list_hidden_library_ids()
         emby_users = client.list_emby_users()
         for emby_user in emby_users:
             emby_user_id = emby_user.get("Id")
             if emby_user_id:
-                client.set_user_library_order(
-                    emby_user_id, normalized_order, hidden_library_ids
-                )
+                client.set_user_library_order(emby_user_id, normalized_order)
     except EmbyError as e:
         return RedirectResponse(f"/settings?error=同步媒体库顺序到Emby失败: {e}", status_code=303)
     db.set_setting("library_order", json.dumps(normalized_order))
