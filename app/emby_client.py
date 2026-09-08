@@ -92,6 +92,17 @@ class EmbyClient:
         resp = self._request("GET", "/Users")
         return resp.json()
 
+    def set_user_library_order(self, emby_user_id, library_ids):
+        """把媒体库顺序写入 Emby 用户配置，供 Web/Vidhub 等客户端读取。"""
+        user = self.get_user(emby_user_id)
+        configuration = dict(user.get("Configuration", {}) or {})
+        configuration["OrderedViews"] = list(library_ids)
+        self._request(
+            "POST",
+            f"/Users/{emby_user_id}/Configuration",
+            json=configuration,
+        )
+
     def get_user(self, emby_user_id):
         resp = self._request("GET", f"/Users/{emby_user_id}")
         return resp.json()

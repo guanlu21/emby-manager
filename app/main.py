@@ -794,8 +794,22 @@ def save_library_order(request: Request, library_order: str = Form("[]")):
             raise ValueError
     except ValueError:
         return RedirectResponse("/settings?error=排序数据格式不对", status_code=303)
+    client = _get_client_or_none()
+    if not client:
+        return RedirectResponse("/settings?error=请先配置Emby连接信息", status_code=303)
+    try:
+        emby_users = client.list_emby_users()
+        for emby_user in emby_users:
+            emby_user_id = emby_user.get("Id")
+            if emby_user_id:
+                client.set_user_library_order(emby_user_id, order)
+    except EmbyError as e:
+        return RedirectResponse(f"/settings?error=同步媒体库顺序到Emby失败: {e}", status_code=303)
     db.set_setting("library_order", json.dumps(order))
-    return RedirectResponse("/settings?msg=媒体库显示顺序已保存", status_code=303)
+    return RedirectResponse(
+        f"/settings?msg=媒体库显示顺序已保存并同步到Emby（共{len(emby_users)}个用户）",
+        status_code=303,
+    )
 
 
 @app.post("/settings/emby")

@@ -25,7 +25,7 @@
   {% elif not libraries %}
     <p class="muted">暂无媒体库，请先确认「Emby 服务器连接」配置正确。</p>
   {% else %}
-    <p class="muted small">拖动下面的库调整顺序，新建/编辑用户等页面的媒体库勾选列表会按这个顺序显示。
+    <p class="muted small">拖动下面的库调整顺序，保存后会同步到 Emby 用户配置，供 Vidhub、网页端等客户端读取。
       新增加到 Emby 的库默认排在最后。</p>
     <ul class="lib-order-list" id="lib-order-list">
       {% for lib in libraries %}
