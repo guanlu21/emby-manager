@@ -40,7 +40,7 @@ class EmbyClient:
         resp = self._request("GET", "/System/Info")
         return resp.json()
 
-    def list_libraries(self):
+    def list_libraries(self, include_unconfigurable=False):
         """
         返回媒体库列表 [{Id, Name}]，这里特意用 /Library/SelectableMediaFolders
         而不是 /Library/VirtualFolders。
@@ -71,9 +71,10 @@ class EmbyClient:
                     # 兼容 Guid 切换前已保存的媒体库排序配置。
                     "LegacyId": item.get("Id"),
                     "Name": item.get("Name"),
+                    "IsUserAccessConfigurable": item.get("IsUserAccessConfigurable", True),
                 }
                 for item in data
-                if item.get("IsUserAccessConfigurable", True)
+                if include_unconfigurable or item.get("IsUserAccessConfigurable", True)
             ]
         except EmbyError:
             # 极老版本 Emby 可能没有这个接口，退回到 VirtualFolders 作为兜底
@@ -94,11 +95,16 @@ class EmbyClient:
         resp = self._request("GET", "/Users")
         return resp.json()
 
-    def set_user_library_order(self, emby_user_id, library_ids):
-        """把媒体库顺序写入 Emby 用户配置，供 Web/Vidhub 等客户端读取。"""
+    def set_user_library_order(self, emby_user_id, library_ids, hidden_library_ids=None):
+        """写入媒体库顺序，并隐藏指定库（如合集），供客户端读取。"""
         user = self.get_user(emby_user_id)
         configuration = dict(user.get("Configuration", {}) or {})
         configuration["OrderedViews"] = list(library_ids)
+        hidden = list(configuration.get("MyMediaExcludes") or [])
+        for library_id in hidden_library_ids or []:
+            if library_id not in hidden:
+                hidden.append(library_id)
+        configuration["MyMediaExcludes"] = hidden
         self._request(
             "POST",
             f"/Users/{emby_user_id}/Configuration",
@@ -110,6 +116,12 @@ class EmbyClient:
             raise EmbyError(
                 f"Emby 用户 {emby_user_id} 的 OrderedViews 写入后不一致，"
                 "网页端媒体库顺序未真正保存，请检查 Emby 版本或接口响应。"
+            )
+        actual_hidden = set(fresh_configuration.get("MyMediaExcludes") or [])
+        if not set(hidden_library_ids or []).issubset(actual_hidden):
+            raise EmbyError(
+                f"Emby 用户 {emby_user_id} 的合集隐藏设置写入后不一致，"
+                "请检查 Emby 版本或接口响应。"
             )
 
     def get_user(self, emby_user_id):
