@@ -112,16 +112,17 @@ class EmbyClient:
         页面时，媒体库勾选框却仍是空的"这个经典 bug——也就是保存看起来成
         功、GET 读回来也显示已生效，但真正生效的库权限其实没变。
 
-        一开始按论坛的说法把这个字段整个从 JSON 里删掉（不发送），结果发现
-        还是没用；后来抓包对比管理后台网页版保存时真正发出去的请求体，
-        发现它是显式发送 "BlockedMediaFolders": null（而不是完全不带这个
-        字段），这样服务端才会正确处理。所以这里统一显式把这个字段设为
-        None（对应 JSON 里的 null），而不是用 pop() 整个去掉。
+        论坛实测确认必须完全不发送 "BlockedMediaFolders" 字段（而不是发送
+        null 或空数组），这样服务端才会正确处理 EnabledFolders。所以这里
+        统一从待提交的 Policy 中删除这个字段，而不是把它设为 None。
         """
         user = self.get_user(emby_user_id)
         policy = user.get("Policy", {}) or {}
         policy.update(policy_patch)
-        policy["BlockedMediaFolders"] = None
+        # Emby 某些版本会因为请求体包含 BlockedMediaFolders（即使值为
+        # null/空数组）而忽略 EnabledFolders，导致页面看似保存成功但用户
+        # 实际没有任何媒体库权限。该字段必须从请求体中完全移除。
+        policy.pop("BlockedMediaFolders", None)
         self._request("POST", f"/Users/{emby_user_id}/Policy", json=policy)
         return policy
 

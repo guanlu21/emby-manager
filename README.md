@@ -115,7 +115,7 @@ Emby 本身不是网盘类应用，没有普适的"用户上传媒体文件"功�
   1. `GET /Users/{id}` 返回的 Policy 里带有 `"BlockedMediaFolders": []` 字段，如果把它原样 POST
      回去，Emby 服务端会出现"管理端/接口显示已经保存成指定的几个库，但客户端登录该账号实际还是能
      看到全部库"的问题（[Emby 官方论坛讨论](https://emby.media/community/topic/130313-seting-user-library-access-from-api/)）。
-     现在提交 Policy 前会自动去掉这个字段。
+     现在提交 Policy 前会自动去掉这个字段（不能发送为空值或 `null`）。
   2. 获取媒体库 Id 用错了接口：之前用的是 `/Library/VirtualFolders`（管理端"媒体库管理"页面用的
      接口），它返回的 Id 有时候和真正写进 `EnabledFolders` 里能生效的 Id 对不上，实测出现过"勾选了
      8 个库，保存后客户端却只能看到其中 1 个（还常常是"合集"这种本来就不支持按用户限制、对所有人
