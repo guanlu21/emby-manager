@@ -107,34 +107,6 @@
   </button>
 </form>
 
-{% if live_policy %}
-<div class="card" style="border-color:#c78300">
-  <h3>Emby 实时校验（用于排查"页面设置了但没生效"）</h3>
-  {% if live_policy.error %}
-    <p class="muted">无法从 Emby 读取当前策略：{{ live_policy.error }}</p>
-  {% else %}
-    <p class="muted small">以下是刚从 Emby 服务器实时读取到的、该用户当前<b>真正生效</b>的设置：</p>
-    <ul>
-      <li>EnableAllFolders（是否不限制媒体库，为 true 说明所有库都能看）：<b>{{ live_policy.enable_all_folders }}</b></li>
-      <li>实际生效的媒体库数量：<b>{{ live_policy.enabled_folder_ids|length }}</b>
-        {% if live_policy.matched_library_names %}
-          （{{ live_policy.matched_library_names|join('、') }}）
-        {% elif live_policy.enabled_folder_ids %}
-          <span class="badge-danger">— 有 {{ live_policy.enabled_folder_ids|length }} 个ID，但没有一个能匹配上当前媒体库列表，说明ID格式不一致，这就是问题所在，请把下面这行原始ID截图发给开发者：</span>
-          <br><code>{{ live_policy.enabled_folder_ids }}</code>
-        {% else %}
-          <span class="badge-danger">— 0个，也就是没有任何库被授权（如果你在上面勾选了媒体库，说明保存没有生效）</span>
-        {% endif %}
-      </li>
-      <li>允许下载：<b>{{ live_policy.enable_download }}</b>，允许下载转码媒体：<b>{{ live_policy.enable_media_conversion }}</b></li>
-      <li>允许相机上传：<b>{{ live_policy.allow_camera_upload }}</b></li>
-      <li>账号是否被禁用：<b>{{ live_policy.is_disabled }}</b></li>
-    </ul>
-  {% endif %}
-</div>
-{% endif %}
-
-
 <script>
 function onDurationPresetChange(){
   const sel = document.getElementById('duration_preset');

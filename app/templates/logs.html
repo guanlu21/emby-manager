@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-head">
+  <h2>操作日志</h2>
+  <a class="btn" href="/">返回用户列表</a>
+</div>
+
+<div class="card" style="max-width:none">
+  <p class="muted small">显示最近 {{ logs|length }} 条操作记录。</p>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>时间</th>
+        <th>用户</th>
+        <th>操作</th>
+        <th>详情</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
+      <tr>
+        <td data-label="时间">{{ log.time_str }}</td>
+        <td data-label="用户">{{ log.username or '-' }}</td>
+        <td data-label="操作">{{ log.action_name }}</td>
+        <td data-label="详情" class="muted">{{ log.detail or '-' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted center">暂无操作日志</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

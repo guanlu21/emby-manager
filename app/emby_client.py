@@ -65,7 +65,12 @@ class EmbyClient:
             return [
                 # EnabledFolders 要求 Guid。只有极老版本未返回 Guid 时，
                 # 才回退到 Id，避免新版本继续提交错误的 Item Id。
-                {"Id": item.get("Guid") or item.get("Id"), "Name": item.get("Name")}
+                {
+                    "Id": item.get("Guid") or item.get("Id"),
+                    # 兼容 Guid 切换前已保存的媒体库排序配置。
+                    "LegacyId": item.get("Id"),
+                    "Name": item.get("Name"),
+                }
                 for item in data
                 if item.get("IsUserAccessConfigurable", True)
             ]
@@ -76,7 +81,11 @@ class EmbyClient:
             result = []
             for item in data:
                 lib_id = item.get("Guid") or item.get("Id") or item.get("ItemId")
-                result.append({"Id": lib_id, "Name": item.get("Name")})
+                result.append({
+                    "Id": lib_id,
+                    "LegacyId": item.get("Id") or item.get("ItemId"),
+                    "Name": item.get("Name"),
+                })
             return result
 
     def list_emby_users(self):

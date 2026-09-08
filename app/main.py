@@ -132,8 +132,15 @@ def _apply_library_order(libraries: list) -> list:
     插到中间，也不会丢）。
     """
     order = json.loads(db.get_setting("library_order") or "[]")
-    order_index = {lib_id: i for i, lib_id in enumerate(order)}
-    return sorted(libraries, key=lambda lib: order_index.get(lib.get("Id"), len(order)))
+    order_index = {str(lib_id): i for i, lib_id in enumerate(order)}
+
+    def sort_key(lib):
+        # 当前配置使用 Guid；LegacyId 用于兼容 Guid 切换前保存的旧排序。
+        current_id = str(lib.get("Id")) if lib.get("Id") is not None else ""
+        legacy_id = str(lib.get("LegacyId")) if lib.get("LegacyId") is not None else ""
+        return order_index.get(current_id, order_index.get(legacy_id, len(order)))
+
+    return sorted(libraries, key=sort_key)
 
 
 _PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -747,6 +754,33 @@ def settings_page(request: Request, msg: str = "", error: str = ""):
             lib_error = str(e)
     return render(request, "settings.html", settings=db.get_all_settings(),
                   msg=msg, error=error, libraries=libraries, lib_error=lib_error)
+
+
+@app.get("/logs", response_class=HTMLResponse)
+def logs_page(request: Request):
+    guard = _guard(request)
+    if guard:
+        return guard
+    action_names = {
+        "create": "创建用户",
+        "import": "导入用户",
+        "update": "修改用户",
+        "extend": "用户续期",
+        "manual_disable": "手动停用",
+        "manual_enable": "手动启用",
+        "auto_expire": "到期自动停用",
+        "auto_expire_failed": "自动停用失败",
+        "delete": "删除用户",
+    }
+    logs = []
+    for log in db.recent_logs(200):
+        log = dict(log)
+        log["time_str"] = datetime.datetime.fromtimestamp(log["ts"]).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        log["action_name"] = action_names.get(log["action"], log["action"])
+        logs.append(log)
+    return render(request, "logs.html", logs=logs)
 
 
 @app.post("/settings/library-order")
