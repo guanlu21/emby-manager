@@ -129,15 +129,33 @@ class EmbyClient:
         )
 
     def hide_user_from_login(self, emby_user_id: str):
-        """隐藏用户，覆盖本地、远程及未识别设备登录界面。"""
-        user = self.get_user(emby_user_id)
-        configuration = dict(user.get("Configuration", {}) or {})
-        configuration.update({
-            "HideThisUserFromLoginScreens": True,
-            "HideThisUserFromLoginScreensOnRemote": True,
-            "HideThisUserFromLoginScreensOnUnrecognizedDevice": True,
+        """
+        隐藏用户，覆盖本地、远程及未识别设备登录界面。
+
+        重要坑点（已用 Emby 官方 REST API 文档核实，见
+        https://dev.emby.media/reference/RestAPI/UserService/postUsersByIdPolicy.html）：
+        这三个开关虽然在后台网页版看起来像是"用户配置"，但实际上是
+        UserPolicy 的字段（IsHidden / IsHiddenRemotely /
+        IsHiddenFromUnusedDevices），必须 POST 到 /Users/{id}/Policy，
+        而不是 /Users/{id}/Configuration。之前误当成 Configuration 字段
+        提交，Emby 服务端会直接忽略这些不认识的字段——接口返回 200、
+        不报错，但根本没有生效，导致用户一直没有真正被隐藏。
+        """
+        self.update_policy(emby_user_id, {
+            "IsHidden": True,
+            "IsHiddenRemotely": True,
+            "IsHiddenFromUnusedDevices": True,
         })
-        self._request("POST", f"/Users/{emby_user_id}/Configuration", json=configuration)
+        fresh_policy = self.get_user(emby_user_id).get("Policy", {}) or {}
+        if not (
+            fresh_policy.get("IsHidden")
+            and fresh_policy.get("IsHiddenRemotely")
+            and fresh_policy.get("IsHiddenFromUnusedDevices")
+        ):
+            raise EmbyError(
+                f"Emby 用户 {emby_user_id} 的隐藏设置写入后未生效，"
+                "请检查 Emby 服务端版本是否支持这几个字段。"
+            )
 
     def update_policy(self, emby_user_id: str, policy_patch: dict):
         """

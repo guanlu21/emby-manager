@@ -81,10 +81,37 @@ function fillRandomCredentials() {
   if (password) password.value = randomText(12, 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789');
 }
 
+function copyToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text);
+  }
+  // 很多 NAS/内网部署是走 http:// 而不是 https://，
+  // 这种"非安全上下文"下 navigator.clipboard 根本不存在，
+  // 直接调用 .writeText 会同步抛错、且不会走到 .catch，
+  // 表现就是点了按钮"毫无反应"。这里改用兼容性更好的
+  // document.execCommand('copy') 兜底。
+  return new Promise((resolve, reject) => {
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      if (ok) resolve(); else reject(new Error('execCommand copy failed'));
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
 function copyCredentials(username, password) {
   const text = `用户名:${username}，密码:${password}`;
-  navigator.clipboard.writeText(text).then(() => alert('用户名和密码已复制')).catch(() => {
-    window.prompt('请复制以下内容', text);
+  copyToClipboard(text).then(() => alert('已复制：' + text)).catch(() => {
+    window.prompt('自动复制失败，请手动复制以下内容：', text);
   });
 }
 
@@ -99,8 +126,3 @@ function resetAndCopyCredentials(userId) {
     .catch(error => alert(error.message));
 }
 
-function sortUsers(field) {
-  const url = new URL(window.location.href);
-  url.searchParams.set('sort', field);
-  window.location.href = url.toString();
-}

@@ -16,17 +16,6 @@
   </div>
 </div>
 
-<div class="row-inline" style="margin-bottom:10px">
-  <label class="muted small">排序：</label>
-  <select onchange="sortUsers(this.value)">
-    <option value="created" {{ 'selected' if sort == 'created' }}>新建时间</option>
-    <option value="expire" {{ 'selected' if sort == 'expire' }}>到期时间</option>
-    <option value="remaining" {{ 'selected' if sort == 'remaining' }}>剩余时间</option>
-    <option value="status" {{ 'selected' if sort == 'status' }}>状态</option>
-    <option value="username" {{ 'selected' if sort == 'username' }}>用户名</option>
-  </select>
-</div>
-
 {% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
 {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
 
@@ -42,12 +31,12 @@
   <thead>
     <tr>
       <th style="width:36px"><input type="checkbox" id="select-all" onclick="toggleAllRows(this)"></th>
-      <th>用户名</th>
+      <th><a class="sort-th" href="/?sort=username&dir={{ sort_headers.username.next_dir }}">用户名{% if sort_headers.username.active %} {{ '▲' if sort_headers.username.current_dir == 'asc' else '▼' }}{% endif %}</a></th>
       <th>密码</th>
       <th>备注</th>
-      <th>到期时间</th>
-      <th>剩余</th>
-      <th>状态</th>
+      <th><a class="sort-th" href="/?sort=expire&dir={{ sort_headers.expire.next_dir }}">到期时间{% if sort_headers.expire.active %} {{ '▲' if sort_headers.expire.current_dir == 'asc' else '▼' }}{% endif %}</a></th>
+      <th><a class="sort-th" href="/?sort=remaining&dir={{ sort_headers.remaining.next_dir }}">剩余{% if sort_headers.remaining.active %} {{ '▲' if sort_headers.remaining.current_dir == 'asc' else '▼' }}{% endif %}</a></th>
+      <th><a class="sort-th" href="/?sort=status&dir={{ sort_headers.status.next_dir }}">状态{% if sort_headers.status.active %} {{ '▲' if sort_headers.status.current_dir == 'asc' else '▼' }}{% endif %}</a></th>
       <th>下载</th>
       <th>上传</th>
       <th>媒体库数</th>

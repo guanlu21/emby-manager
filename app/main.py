@@ -225,7 +225,11 @@ def _decorate_user(u: dict) -> dict:
 def _hide_all_emby_users(client):
     for emby_user in client.list_emby_users():
         if emby_user.get("Id"):
-            client.hide_user_from_login(emby_user["Id"])
+            try:
+                client.hide_user_from_login(emby_user["Id"])
+            except EmbyError:
+                # 单个用户隐藏失败（比如刚好在改权限）不应该影响其它用户
+                pass
 
 
 def _sync_saved_library_order(client, emby_user_id):
@@ -251,8 +255,21 @@ def _sync_saved_library_order(client, emby_user_id):
         db.set_setting("library_order", json.dumps(normalized))
 
 
+_SORT_DESC_BY_DEFAULT = {"created", "expire", "remaining"}
+
+
+def _next_sort_dir(field: str, current_sort: str, current_dir: str) -> str:
+    """点击某一列表头时，算出这一列下一次应该排的方向。
+    如果点的就是当前正在排序的这一列，方向反转；如果是切换到新的一列，
+    用这一列原本比较合理的默认方向（时间类默认从新到旧，文字类默认 A-Z）。
+    """
+    if field == current_sort:
+        return "asc" if current_dir == "desc" else "desc"
+    return "desc" if field in _SORT_DESC_BY_DEFAULT else "asc"
+
+
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, msg: str = "", error: str = "", sort: str = "created"):
+def dashboard(request: Request, msg: str = "", error: str = "", sort: str = "created", dir: str = "desc"):
     guard = _guard(request)
     if guard:
         return guard
@@ -270,10 +287,23 @@ def dashboard(request: Request, msg: str = "", error: str = "", sort: str = "cre
         "status": lambda u: {"active": 0, "disabled": 1, "expired": 2}.get(u.get("status"), 3),
         "username": lambda u: (u.get("username") or "").lower(),
     }
+    if dir not in ("asc", "desc"):
+        dir = "desc"
     if sort in sort_keys:
-        users.sort(key=sort_keys[sort], reverse=sort not in ("status", "username"))
+        users.sort(key=sort_keys[sort], reverse=(dir == "desc"))
+    # 表头可点击的列：用户名 / 到期时间 / 剩余 / 状态。
+    # 每一列都算好"再点一次应该跳到哪个方向"，模板里直接用来拼链接。
+    sort_headers = {
+        field: {
+            "active": sort == field,
+            "current_dir": dir if sort == field else None,
+            "next_dir": _next_sort_dir(field, sort, dir),
+        }
+        for field in ("username", "expire", "remaining", "status")
+    }
     return render(request, "dashboard.html", users=users, msg=msg, error=error,
-                  sort=sort, emby_configured=bool(db.get_setting("emby_url") and db.get_setting("emby_api_key")))
+                  sort=sort, dir=dir, sort_headers=sort_headers,
+                  emby_configured=bool(db.get_setting("emby_url") and db.get_setting("emby_api_key")))
 
 
 # ---------------- 新建用户 ----------------
