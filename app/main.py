@@ -223,13 +223,33 @@ def _decorate_user(u: dict) -> dict:
 # ---------------- 仪表盘 ----------------
 
 def _hide_all_emby_users(client):
+    """
+    这里以前对每个用户都无条件调用一次 hide_user_from_login，而这个方法
+    内部为了确保真的生效，要往 Emby 发好几次请求（读取+写入+校验）。
+    用户一多、每次刷新首页都要重复这些请求，是页面普遍卡顿的主要原因。
+
+    实际上 GET /Users 返回的列表里已经带了每个用户当前的 Policy（包含
+    IsHidden 等字段），可以直接从这一次列表请求里判断"是不是已经隐藏过
+    了"——已经隐藏好的用户直接跳过，不用再额外发请求；只有真正还没处理
+    过的用户（比如刚导入、还没走过隐藏流程的）才需要真正调用一次。
+    """
     for emby_user in client.list_emby_users():
-        if emby_user.get("Id"):
-            try:
-                client.hide_user_from_login(emby_user["Id"])
-            except EmbyError:
-                # 单个用户隐藏失败（比如刚好在改权限）不应该影响其它用户
-                pass
+        emby_id = emby_user.get("Id")
+        if not emby_id:
+            continue
+        policy = emby_user.get("Policy") or {}
+        already_hidden = (
+            policy.get("IsHidden")
+            and policy.get("IsHiddenRemotely")
+            and policy.get("IsHiddenFromUnusedDevices")
+        )
+        if already_hidden:
+            continue
+        try:
+            client.hide_user_from_login(emby_id)
+        except EmbyError:
+            # 单个用户隐藏失败（比如刚好在改权限）不应该影响其它用户
+            pass
 
 
 def _sync_saved_library_order(client, emby_user_id):
