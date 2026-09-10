@@ -48,7 +48,7 @@
     <tr class="{{ 'row-danger' if u.status != 'active' else '' }}">
       <td data-label="选择"><input type="checkbox" class="row-select" value="{{ u.id }}"></td>
       <td data-label="用户名"><b>{{ u.username }}</b></td>
-      <td data-label="密码">{% if u.password %}<button type="button" class="btn small" onclick="copyCredentials({{ u.username|tojson }}, {{ u.password|tojson }})">复制账号密码</button>{% else %}<button type="button" class="btn small" onclick="resetAndCopyCredentials({{ u.id }})">生成并复制密码</button>{% endif %}</td>
+      <td data-label="密码">{% if u.password %}<button type="button" class="btn small" onclick='copyCredentials({{ u.username|tojson }}, {{ u.password|tojson }})'>复制账号密码</button>{% else %}<button type="button" class="btn small" onclick="resetAndCopyCredentials({{ u.id }})">生成并复制密码</button>{% endif %}</td>
       <td data-label="备注" class="muted">{{ u.note or '-' }}</td>
       <td data-label="到期时间">{{ u.expire_at_str or '永久' }}</td>
       <td data-label="剩余">
