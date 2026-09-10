@@ -209,7 +209,6 @@ def _decorate_user(u: dict) -> dict:
 
 # ---------------- 仪表盘 ----------------
 
-@app.get("/", response_class=HTMLResponse)
 def _hide_all_emby_users(client):
     for emby_user in client.list_emby_users():
         if emby_user.get("Id"):
@@ -239,6 +238,7 @@ def _sync_saved_library_order(client, emby_user_id):
         db.set_setting("library_order", json.dumps(normalized))
 
 
+@app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, msg: str = "", error: str = "", sort: str = "created"):
     guard = _guard(request)
     if guard:
