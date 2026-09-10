@@ -17,6 +17,19 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 
+@app.middleware("http")
+async def _no_cache_static(request: Request, call_next):
+    """
+    浏览器经常会长期缓存 /static 下的 JS/CSS，导致重新部署新代码后，
+    页面看起来变了（服务端渲染的 HTML 是新的），但脚本还是旧的，
+    点按钮"没反应"——这里统一禁止对静态资源做强缓存，避免这种排查成本。
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
 @app.on_event("startup")
 def on_startup():
     db.init_db()
