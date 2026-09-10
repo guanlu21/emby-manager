@@ -109,7 +109,7 @@ function copyToClipboard(text) {
 }
 
 function copyCredentials(username, password) {
-  const text = `用户名:${username}，密码:${password}`;
+  const text = `用户名：${username}，密码：${password}`;
   copyToClipboard(text).then(() => alert('已复制：' + text)).catch(() => {
     window.prompt('自动复制失败，请手动复制以下内容：', text);
   });

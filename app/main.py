@@ -555,6 +555,7 @@ def update_user(
     request: Request,
     user_id: int,
     note: str = Form(""),
+    password: str = Form(""),
     duration_preset: str = Form(""),
     expire_date: str = Form(""),
     library_ids: list = Form([]),
@@ -587,14 +588,20 @@ def update_user(
                 u["emby_user_id"], library_ids, bool(enable_download),
                 bool(enable_download_transcode), bool(enable_upload),
             )
-        db.update_user(
-            user_id, note=note, expire_at=expire_at,
+            # 密码框留空表示不修改；只有真正填了新密码才去改 Emby 密码。
+            if password:
+                client.set_password(u["emby_user_id"], password)
+        updates = dict(
+            note=note, expire_at=expire_at,
             library_ids=json.dumps(library_ids),
             enable_download=int(bool(enable_download)),
             enable_download_transcode=int(bool(enable_download_transcode)),
             enable_upload=int(bool(enable_upload)),
         )
-        db.add_log(u["username"], "update", "")
+        if password:
+            updates["password"] = password
+        db.update_user(user_id, **updates)
+        db.add_log(u["username"], "update", "修改密码" if password else "")
     except EmbyError as e:
         return RedirectResponse(f"/users/{user_id}/edit?error={e}", status_code=303)
 

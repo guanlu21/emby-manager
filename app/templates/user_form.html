@@ -37,6 +37,11 @@
   <label>Emby 用户名</label>
   <input type="text" value="{{ user.username }}" disabled>
   <p class="muted small">导入已有用户不需要也不会修改密码，沿用该账号原密码。</p>
+  {% elif mode == "edit" %}
+  <label>修改密码（留空则不修改）</label>
+  <div class="row-inline"><input type="text" name="password" placeholder="留空保持原密码不变" value="">
+    <button type="button" class="btn" onclick="fillRandomCredentials()">随机生成密码</button></div>
+  <p class="muted small">填写后保存，会立即在 Emby 里把该用户密码改成这里填的内容。</p>
   {% endif %}
 
   <label>备注（可选，例如联系方式）</label>
