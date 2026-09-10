@@ -16,6 +16,17 @@
   </div>
 </div>
 
+<div class="row-inline" style="margin-bottom:10px">
+  <label class="muted small">排序：</label>
+  <select onchange="sortUsers(this.value)">
+    <option value="created" {{ 'selected' if sort == 'created' }}>新建时间</option>
+    <option value="expire" {{ 'selected' if sort == 'expire' }}>到期时间</option>
+    <option value="remaining" {{ 'selected' if sort == 'remaining' }}>剩余时间</option>
+    <option value="status" {{ 'selected' if sort == 'status' }}>状态</option>
+    <option value="username" {{ 'selected' if sort == 'username' }}>用户名</option>
+  </select>
+</div>
+
 {% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
 {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
 
@@ -32,6 +43,7 @@
     <tr>
       <th style="width:36px"><input type="checkbox" id="select-all" onclick="toggleAllRows(this)"></th>
       <th>用户名</th>
+      <th>密码</th>
       <th>备注</th>
       <th>到期时间</th>
       <th>剩余</th>
@@ -47,6 +59,7 @@
     <tr class="{{ 'row-danger' if u.status != 'active' else '' }}">
       <td data-label="选择"><input type="checkbox" class="row-select" value="{{ u.id }}"></td>
       <td data-label="用户名"><b>{{ u.username }}</b></td>
+      <td data-label="密码">{% if u.password %}<button type="button" class="btn small" onclick="copyCredentials({{ u.username|tojson }}, {{ u.password|tojson }})">复制账号密码</button>{% else %}<button type="button" class="btn small" onclick="resetAndCopyCredentials({{ u.id }})">生成并复制密码</button>{% endif %}</td>
       <td data-label="备注" class="muted">{{ u.note or '-' }}</td>
       <td data-label="到期时间">{{ u.expire_at_str or '永久' }}</td>
       <td data-label="剩余">
@@ -85,7 +98,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="10" class="muted center">暂无用户，点击右上角「新建用户」开始</td></tr>
+    <tr><td colspan="11" class="muted center">暂无用户，点击右上角「新建用户」开始</td></tr>
     {% endfor %}
   </tbody>
 </table>

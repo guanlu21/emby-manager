@@ -28,7 +28,8 @@
     else '/users/' + user.id|string + '/update') }}">
   {% if mode == "new" %}
   <label>用户名</label>
-  <input type="text" name="username" required value="{{ form.username if form else '' }}">
+  <div class="row-inline"><input type="text" name="username" required value="{{ form.username if form else '' }}">
+    <button type="button" class="btn" onclick="fillRandomCredentials()">随机用户名和密码</button></div>
 
   <label>初始密码</label>
   <input type="text" name="password" required value="{{ form.password if form else '' }}">

@@ -67,3 +67,40 @@ function batchAction(action, confirmMsg) {
   _fillUserIds(form, ids);
   form.submit();
 }
+
+function randomText(length, alphabet) {
+  let result = '';
+  for (let i = 0; i < length; i++) result += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return result;
+}
+
+function fillRandomCredentials() {
+  const username = document.querySelector('input[name=username]');
+  const password = document.querySelector('input[name=password]');
+  if (username) username.value = 'user_' + randomText(8, 'abcdefghjkmnpqrstuvwxyz23456789');
+  if (password) password.value = randomText(12, 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789');
+}
+
+function copyCredentials(username, password) {
+  const text = `用户名:${username}，密码:${password}`;
+  navigator.clipboard.writeText(text).then(() => alert('用户名和密码已复制')).catch(() => {
+    window.prompt('请复制以下内容', text);
+  });
+}
+
+function resetAndCopyCredentials(userId) {
+  if (!confirm('该用户的原密码未记录，将生成并设置一个新密码，是否继续？')) return;
+  fetch(`/users/${userId}/reset-password`, {method: 'POST'})
+    .then(response => response.json().then(data => ({ok: response.ok, data})))
+    .then(result => {
+      if (!result.ok) throw new Error(result.data.error || '操作失败');
+      copyCredentials(result.data.username, result.data.password);
+    })
+    .catch(error => alert(error.message));
+}
+
+function sortUsers(field) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('sort', field);
+  window.location.href = url.toString();
+}

@@ -210,13 +210,57 @@ def _decorate_user(u: dict) -> dict:
 # ---------------- 仪表盘 ----------------
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, msg: str = "", error: str = ""):
+def _hide_all_emby_users(client):
+    for emby_user in client.list_emby_users():
+        if emby_user.get("Id"):
+            client.hide_user_from_login(emby_user["Id"])
+
+
+def _sync_saved_library_order(client, emby_user_id):
+    libraries = client.list_libraries()
+    order = json.loads(db.get_setting("library_order") or "[]")
+    id_to_guid = {}
+    for library in libraries:
+        guid = library.get("Guid") or library.get("Id")
+        for value in (library.get("Id"), library.get("Guid"), library.get("LegacyId")):
+            if value is not None:
+                id_to_guid[str(value)] = guid
+    normalized = []
+    for value in order:
+        guid = id_to_guid.get(str(value))
+        if guid and guid not in normalized:
+            normalized.append(guid)
+    for library in libraries:
+        guid = library.get("Guid") or library.get("Id")
+        if guid and guid not in normalized:
+            normalized.append(guid)
+    client.set_user_library_order(emby_user_id, normalized)
+    if normalized != order:
+        db.set_setting("library_order", json.dumps(normalized))
+
+
+def dashboard(request: Request, msg: str = "", error: str = "", sort: str = "created"):
     guard = _guard(request)
     if guard:
         return guard
+    client = _get_client_or_none()
+    if client:
+        try:
+            _hide_all_emby_users(client)
+        except EmbyError:
+            pass
     users = [_decorate_user(u) for u in db.list_users()]
+    sort_keys = {
+        "created": lambda u: u.get("created_at") or 0,
+        "expire": lambda u: u.get("expire_at") or 253402300799,
+        "remaining": lambda u: u.get("days_left") if u.get("days_left") is not None else 253402300799,
+        "status": lambda u: {"active": 0, "disabled": 1, "expired": 2}.get(u.get("status"), 3),
+        "username": lambda u: (u.get("username") or "").lower(),
+    }
+    if sort in sort_keys:
+        users.sort(key=sort_keys[sort], reverse=sort not in ("status", "username"))
     return render(request, "dashboard.html", users=users, msg=msg, error=error,
-                  emby_configured=bool(db.get_setting("emby_url") and db.get_setting("emby_api_key")))
+                  sort=sort, emby_configured=bool(db.get_setting("emby_url") and db.get_setting("emby_api_key")))
 
 
 # ---------------- 新建用户 ----------------
@@ -274,6 +318,7 @@ def create_user(
         emby_user = client.create_user(username)
         emby_id = emby_user["Id"]
         client.set_password(emby_id, password)
+        client.hide_user_from_login(emby_id)
         client.set_libraries_and_permissions(
             emby_id, library_ids, bool(enable_download),
             bool(enable_download_transcode), bool(enable_upload),
@@ -282,8 +327,9 @@ def create_user(
             emby_user_id=emby_id, username=username, expire_at=expire_at,
             library_ids=library_ids, enable_download=bool(enable_download),
             enable_download_transcode=bool(enable_download_transcode),
-            enable_upload=bool(enable_upload), note=note,
+            enable_upload=bool(enable_upload), note=note, password=password,
         )
+        _sync_saved_library_order(client, emby_id)
         db.add_log(username, "create", f"expire_at={expire_at}")
     except EmbyError as e:
         client2 = _get_client_or_none()
@@ -526,6 +572,26 @@ def extend_user(request: Request, user_id: int, days: int = Form(...)):
     return RedirectResponse(f"/?msg=已为 {u['username']} 续期 {days} 天", status_code=303)
 
 
+@app.post("/users/{user_id}/reset-password")
+def reset_user_password(request: Request, user_id: int):
+    guard = _guard(request)
+    if guard:
+        return guard
+    u = db.get_user(user_id)
+    if not u:
+        return JSONResponse({"error": "用户不存在"}, status_code=404)
+    client = _get_client_or_none()
+    if not client:
+        return JSONResponse({"error": "请先配置 Emby 连接信息"}, status_code=400)
+    password = _gen_random_password()
+    try:
+        client.set_password(u["emby_user_id"], password)
+        db.update_user(user_id, password=password)
+    except EmbyError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse({"username": u["username"], "password": password})
+
+
 @app.post("/users/{user_id}/disable")
 def disable_user(request: Request, user_id: int):
     guard = _guard(request)
@@ -634,6 +700,7 @@ def batch_create_users(
             emby_user = client.create_user(username)
             emby_id = emby_user["Id"]
             client.set_password(emby_id, password)
+            client.hide_user_from_login(emby_id)
             client.set_libraries_and_permissions(
                 emby_id, library_ids, bool(enable_download),
                 bool(enable_download_transcode), bool(enable_upload),
@@ -642,8 +709,9 @@ def batch_create_users(
                 emby_user_id=emby_id, username=username, expire_at=expire_at,
                 library_ids=library_ids, enable_download=bool(enable_download),
                 enable_download_transcode=bool(enable_download_transcode),
-                enable_upload=bool(enable_upload), note=note,
+                enable_upload=bool(enable_upload), note=note, password=password,
             )
+            _sync_saved_library_order(client, emby_id)
             db.add_log(username, "create", f"批量创建 expire_at={expire_at}")
             results.append({"username": username, "password": password,
                              "ok": True, "message": "创建成功"})

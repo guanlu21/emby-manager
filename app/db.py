@@ -42,6 +42,7 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 emby_user_id TEXT UNIQUE NOT NULL,
                 username TEXT NOT NULL,
+                password TEXT DEFAULT '',
                 note TEXT DEFAULT '',
                 created_at INTEGER NOT NULL,
                 expire_at INTEGER,               -- unix timestamp, NULL = 永久
@@ -57,6 +58,10 @@ def init_db():
         # 补一下这个字段，已存在就忽略报错。
         try:
             conn.execute("ALTER TABLE users ADD COLUMN enable_download_transcode INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN password TEXT DEFAULT ''")
         except sqlite3.OperationalError:
             pass
         conn.execute("""
@@ -109,15 +114,15 @@ def get_all_settings():
 # ---------------- users ----------------
 
 def add_user(emby_user_id, username, expire_at, library_ids, enable_download,
-             enable_upload, enable_download_transcode=False, note=""):
+             enable_upload, enable_download_transcode=False, note="", password=""):
     with get_conn() as conn:
         conn.execute(
             """INSERT INTO users
-               (emby_user_id, username, note, created_at, expire_at, library_ids,
+               (emby_user_id, username, password, note, created_at, expire_at, library_ids,
                 enable_download, enable_download_transcode, enable_upload, status)
-               VALUES (?,?,?,?,?,?,?,?,?, 'active')""",
+               VALUES (?,?,?,?,?,?,?,?,?,?, 'active')""",
             (
-                emby_user_id, username, note, int(time.time()), expire_at,
+                emby_user_id, username, password, note, int(time.time()), expire_at,
                 json.dumps(library_ids), int(enable_download),
                 int(enable_download_transcode), int(enable_upload),
             ),

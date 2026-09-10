@@ -128,6 +128,17 @@ class EmbyClient:
             json={"NewPw": new_password, "ResetPassword": False},
         )
 
+    def hide_user_from_login(self, emby_user_id: str):
+        """隐藏用户，覆盖本地、远程及未识别设备登录界面。"""
+        user = self.get_user(emby_user_id)
+        configuration = dict(user.get("Configuration", {}) or {})
+        configuration.update({
+            "HideThisUserFromLoginScreens": True,
+            "HideThisUserFromLoginScreensOnRemote": True,
+            "HideThisUserFromLoginScreensOnUnrecognizedDevice": True,
+        })
+        self._request("POST", f"/Users/{emby_user_id}/Configuration", json=configuration)
+
     def update_policy(self, emby_user_id: str, policy_patch: dict):
         """
         Emby 要求 POST 完整 Policy 对象，因此先取当前 Policy 再合并覆盖。
