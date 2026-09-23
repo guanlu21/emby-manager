@@ -68,8 +68,8 @@ scheduler = BackgroundScheduler()
 
 
 def start_scheduler():
-    # 每小时检查一次到期状态
-    scheduler.add_job(check_and_disable_expired, "interval", hours=1, id="expire_check", replace_existing=True)
+    # 每 5 分钟检查一次到期状态，让到期后的自动停用更及时
+    scheduler.add_job(check_and_disable_expired, "interval", minutes=5, id="expire_check", replace_existing=True)
     scheduler.start()
     # 启动时立即跑一次
     check_and_disable_expired()

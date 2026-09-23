@@ -106,35 +106,31 @@ def _get_client_or_none():
     return EmbyClient(url, key)
 
 
-def _end_of_day_ts(date_str: str) -> int:
-    """
-    把"YYYY-MM-DD"这种到期日期解析成"当天 23:59:59"的时间戳。
-
-    坑点：之前直接 strptime 出来是"当天 00:00:00"，导致到期当天一开始
-    （只要过了 0 点）就已经算作"过期"，页面上剩余天数会显示成负数——
-    但实际应该是"到期当天仍然算有效，过完这一天之后才算过期"，所以这里
-    统一取当天的最后一秒，而不是最开始一秒。
-    """
-    dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
-    dt = dt.replace(hour=23, minute=59, second=59)
-    return int(dt.timestamp())
-
-
 def _calc_expire_at(duration_preset: str, expire_date: str, base_ts: int = None):
     """
     统一计算到期时间戳。duration_preset 为空字符串代表"永久"（返回 None）。
 
-    duration_preset == "15min" 是一个特殊值，代表"15 分钟"，主要用于短期
-    测试/体验账号，不是按天数计算，单独处理。
+    base_ts 是这次计算的"参考时刻"（不传则默认取当前时间），它的时:分:秒
+    会被保留到最终的到期时间里：
+
+    - 天数预设（"1"/"30"/"365" 等）和 "15min"：以 base_ts 为起点，精确
+      往后推算相应的秒数。例如今天 9:00 创建的账户选"1 天"，到期时间
+      就是明天 9:00，而不是笼统地取到当天/次日的 23:59:59。
+    - "custom"（自定义到期日期）：到期日期部分用管理员选择的那一天，
+      但时:分:秒沿用 base_ts 的时:分:秒——这样同一个账户不管是用预设
+      天数还是自定义日期设置到期时间，到期时刻的"钟点"都保持一致，
+      不会出现"选个日期就统一变成 23:59:59 才到期"的情况。
     """
+    base = base_ts if base_ts is not None else int(time.time())
     try:
         if duration_preset == "custom" and expire_date:
-            return _end_of_day_ts(expire_date)
+            date_part = datetime.datetime.strptime(expire_date, "%Y-%m-%d")
+            ref_dt = datetime.datetime.fromtimestamp(base)
+            dt = date_part.replace(hour=ref_dt.hour, minute=ref_dt.minute, second=ref_dt.second)
+            return int(dt.timestamp())
         elif duration_preset == "15min":
-            base = base_ts if base_ts is not None else int(time.time())
             return base + 15 * 60
         elif duration_preset and duration_preset != "custom":
-            base = base_ts if base_ts is not None else int(time.time())
             return base + int(duration_preset) * 86400
     except ValueError:
         pass
@@ -515,14 +511,7 @@ def do_import_user(
     if not client:
         return RedirectResponse("/settings?error=请先配置Emby连接信息", status_code=303)
 
-    expire_at = None
-    try:
-        if duration_preset == "custom" and expire_date:
-            expire_at = _end_of_day_ts(expire_date)
-        elif duration_preset and duration_preset != "custom":
-            expire_at = int(time.time()) + int(duration_preset) * 86400
-    except ValueError:
-        pass
+    expire_at = _calc_expire_at(duration_preset, expire_date)
 
     username = emby_user_id
     try:
@@ -601,7 +590,11 @@ def update_user(
     if duration_preset == "":
         expire_at = None
     else:
-        expire_at = _calc_expire_at(duration_preset, expire_date)
+        # 自定义日期：沿用该账户创建时的时:分:秒，而不是编辑操作发生的
+        # 时刻，这样不管什么时候来改成自定义日期，到期的"钟点"都和这个
+        # 账户本身保持一致，不会因为编辑时间不同而变来变去。
+        ref_ts = u["created_at"] if duration_preset == "custom" else None
+        expire_at = _calc_expire_at(duration_preset, expire_date, base_ts=ref_ts)
         if expire_at is None:
             expire_at = u["expire_at"]
 
