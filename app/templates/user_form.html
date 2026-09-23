@@ -50,6 +50,7 @@
   <label>使用期限</label>
   <div class="row-inline">
     <select name="duration_preset" id="duration_preset" onchange="onDurationPresetChange()">
+      <option value="15min">15 分钟（测试/体验用）</option>
       <option value="1">1 天</option>
       <option value="30" {{ "selected" if mode != "import" }}>30 天</option>
       <option value="365">365 天</option>

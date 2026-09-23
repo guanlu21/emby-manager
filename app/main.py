@@ -123,10 +123,16 @@ def _end_of_day_ts(date_str: str) -> int:
 def _calc_expire_at(duration_preset: str, expire_date: str, base_ts: int = None):
     """
     统一计算到期时间戳。duration_preset 为空字符串代表"永久"（返回 None）。
+
+    duration_preset == "15min" 是一个特殊值，代表"15 分钟"，主要用于短期
+    测试/体验账号，不是按天数计算，单独处理。
     """
     try:
         if duration_preset == "custom" and expire_date:
             return _end_of_day_ts(expire_date)
+        elif duration_preset == "15min":
+            base = base_ts if base_ts is not None else int(time.time())
+            return base + 15 * 60
         elif duration_preset and duration_preset != "custom":
             base = base_ts if base_ts is not None else int(time.time())
             return base + int(duration_preset) * 86400
@@ -188,9 +194,13 @@ def _do_delete(u: dict):
     db.add_log(u["username"], "delete", "")
 
 
-def _do_extend(u: dict, days: int):
+def _do_extend(u: dict, days: int = 0, minutes: int = 0):
+    """统一的续期逻辑。days 按天续期（原有的续期/批量续期用），minutes 按
+    分钟续期（用于"+15分钟"这类短期测试场景的快速续期）。两者可以同时传，
+    最终按 days*86400 + minutes*60 秒数叠加。
+    """
     base = u["expire_at"] if u["expire_at"] and u["expire_at"] > int(time.time()) else int(time.time())
-    new_expire = base + days * 86400
+    new_expire = base + days * 86400 + minutes * 60
     updates = {"expire_at": new_expire}
     if u["status"] in ("expired", "disabled") and new_expire > int(time.time()):
         client = _get_client_or_none()
@@ -201,7 +211,12 @@ def _do_extend(u: dict, days: int):
         except EmbyError:
             pass
     db.update_user(u["id"], **updates)
-    db.add_log(u["username"], "extend", f"+{days}天")
+    parts = []
+    if days:
+        parts.append(f"+{days}天")
+    if minutes:
+        parts.append(f"+{minutes}分钟")
+    db.add_log(u["username"], "extend", "".join(parts) or "+0")
 
 
 def _decorate_user(u: dict) -> dict:
@@ -368,14 +383,7 @@ def create_user(
         return RedirectResponse("/settings?error=" + "请先配置Emby连接信息", status_code=303)
 
     # 计算到期时间戳
-    expire_at = None
-    try:
-        if duration_preset == "custom" and expire_date:
-            expire_at = _end_of_day_ts(expire_date)
-        elif duration_preset and duration_preset != "custom":
-            expire_at = int(time.time()) + int(duration_preset) * 86400
-    except ValueError:
-        pass
+    expire_at = _calc_expire_at(duration_preset, expire_date)
 
     try:
         emby_user = client.create_user(username)
@@ -590,16 +598,12 @@ def update_user(
     if not u:
         return RedirectResponse("/?error=用户不存在", status_code=303)
 
-    expire_at = u["expire_at"]
-    try:
-        if duration_preset == "custom" and expire_date:
-            expire_at = _end_of_day_ts(expire_date)
-        elif duration_preset == "":
-            expire_at = None
-        elif duration_preset:
-            expire_at = int(time.time()) + int(duration_preset) * 86400
-    except ValueError:
-        pass
+    if duration_preset == "":
+        expire_at = None
+    else:
+        expire_at = _calc_expire_at(duration_preset, expire_date)
+        if expire_at is None:
+            expire_at = u["expire_at"]
 
     client = _get_client_or_none()
     try:
@@ -638,8 +642,21 @@ def extend_user(request: Request, user_id: int, days: int = Form(...)):
     u = db.get_user(user_id)
     if not u:
         return RedirectResponse("/?error=用户不存在", status_code=303)
-    _do_extend(u, days)
+    _do_extend(u, days=days)
     return RedirectResponse(f"/?msg=已为 {u['username']} 续期 {days} 天", status_code=303)
+
+
+@app.post("/users/{user_id}/extend-minutes")
+def extend_user_minutes(request: Request, user_id: int, minutes: int = Form(15)):
+    """快速按分钟续期，主要给「+15分钟」这类短期测试场景用的快捷按钮。"""
+    guard = _guard(request)
+    if guard:
+        return guard
+    u = db.get_user(user_id)
+    if not u:
+        return RedirectResponse("/?error=用户不存在", status_code=303)
+    _do_extend(u, minutes=minutes)
+    return RedirectResponse(f"/?msg=已为 {u['username']} 增加 {minutes} 分钟使用期限", status_code=303)
 
 
 @app.post("/users/{user_id}/reset-password")
@@ -810,7 +827,7 @@ def batch_extend_users(request: Request, user_ids: list = Form([]), days: int = 
         if not u:
             fail += 1
             continue
-        _do_extend(u, days)
+        _do_extend(u, days=days)
         ok += 1
     msg = f"批量续期完成：成功 {ok} 个" + (f"，失败 {fail} 个" if fail else "")
     return RedirectResponse(f"/?msg={msg}", status_code=303)
@@ -853,6 +870,70 @@ def batch_enable_users(request: Request, user_ids: list = Form([])):
         except EmbyError:
             fail += 1
     msg = f"批量启用完成：成功 {ok} 个" + (f"，失败 {fail} 个" if fail else "")
+    return RedirectResponse(f"/?msg={msg}", status_code=303)
+
+
+@app.get("/users/batch-libraries", response_class=HTMLResponse)
+def batch_libraries_page(request: Request, ids: str = ""):
+    """
+    批量管理老用户的媒体库：从仪表盘勾选一批已存在的用户后跳转到这里，
+    统一勾选一套媒体库（支持全选/全不选/反选），保存后会覆盖这批用户
+    各自原有的媒体库权限；下载/上传等其它权限维持每个用户原来的设置
+    不受影响。
+    """
+    guard = _guard(request)
+    if guard:
+        return guard
+    id_list = []
+    for part in ids.split(","):
+        part = part.strip()
+        if part.isdigit():
+            id_list.append(int(part))
+    users = [_decorate_user(u) for uid in id_list if (u := db.get_user(uid))]
+    if not users:
+        return RedirectResponse("/?error=请先在列表里勾选要设置媒体库的用户", status_code=303)
+
+    client = _get_client_or_none()
+    libraries, error = [], ""
+    if client:
+        try:
+            libraries = _apply_library_order(client.list_libraries())
+        except EmbyError as e:
+            error = str(e)
+    else:
+        error = "尚未配置 Emby 连接信息，请先前往设置页面配置"
+    return render(request, "batch_libraries.html", users=users, libraries=libraries,
+                  error=error, ids=ids)
+
+
+@app.post("/users/batch-libraries")
+def batch_set_libraries(request: Request, user_ids: list = Form([]), library_ids: list = Form([])):
+    guard = _guard(request)
+    if guard:
+        return guard
+    client = _get_client_or_none()
+    if not client:
+        return RedirectResponse("/settings?error=请先配置Emby连接信息", status_code=303)
+    ok, fail = 0, 0
+    for uid in user_ids:
+        u = db.get_user(int(uid))
+        if not u:
+            fail += 1
+            continue
+        try:
+            # 只覆盖媒体库列表，下载/上传权限沿用该用户原来的设置，避免
+            # 批量操作意外改动这些跟媒体库无关的权限。
+            client.set_libraries_and_permissions(
+                u["emby_user_id"], library_ids, bool(u["enable_download"]),
+                bool(u["enable_download_transcode"]), bool(u["enable_upload"]),
+            )
+            db.update_user(u["id"], library_ids=json.dumps(library_ids))
+            _sync_saved_library_order(client, u["emby_user_id"])
+            db.add_log(u["username"], "update", "批量设置媒体库")
+            ok += 1
+        except EmbyError:
+            fail += 1
+    msg = f"批量设置媒体库完成：成功 {ok} 个" + (f"，失败 {fail} 个" if fail else "")
     return RedirectResponse(f"/?msg={msg}", status_code=303)
 
 

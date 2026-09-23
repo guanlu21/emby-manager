@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-head">
+  <h2>批量设置媒体库</h2>
+  <a class="btn" href="/">返回列表</a>
+</div>
+
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<div class="card" style="max-width:900px">
+  <p class="muted small">
+    将为以下 <b>{{ users|length }}</b> 个用户统一设置媒体库访问权限（保存后会覆盖这些用户各自原有的媒体库勾选；
+    下载/上传等其它权限维持每个用户原来的设置，不会被这次操作改动）：
+  </p>
+  <div class="row-inline" style="flex-wrap:wrap; gap:6px">
+    {% for u in users %}
+    <span class="badge-ok">{{ u.username }}</span>
+    {% endfor %}
+  </div>
+</div>
+
+<form class="card" method="post" action="/users/batch-libraries" style="max-width:900px">
+  {% for u in users %}
+  <input type="hidden" name="user_ids" value="{{ u.id }}">
+  {% endfor %}
+
+  <label>统一设置为以下媒体库</label>
+  <div class="row-inline" style="margin-bottom:6px">
+    <button type="button" class="btn small" onclick="setAllLibs(true)">全选</button>
+    <button type="button" class="btn small" onclick="setAllLibs(false)">全不选</button>
+    <button type="button" class="btn small" onclick="invertLibs()">反选</button>
+  </div>
+  <div class="lib-list" id="lib-list">
+    {% for lib in libraries %}
+    <label class="checkbox">
+      <input type="checkbox" name="library_ids" value="{{ lib.Id }}">
+      {{ lib.Name }}
+    </label>
+    {% else %}
+    <p class="muted">未能获取媒体库列表，请检查「设置」中的 Emby 连接信息。</p>
+    {% endfor %}
+  </div>
+  <p class="muted small">如果这里没看到"合集"这类聚合库：Emby 不支持对这类库做按用户限制，
+    它会对所有账号始终可见，所以不在这里提供勾选（勾不勾都不影响它是否显示）。</p>
+
+  <button type="submit" class="btn primary" onclick="return confirm('确认为以上 {{ users|length }} 个用户统一覆盖设置所选媒体库？');">
+    保存并应用到这 {{ users|length }} 个用户
+  </button>
+</form>
+
+<script>
+function setAllLibs(checked){
+  document.querySelectorAll('#lib-list input[type=checkbox]').forEach(cb => cb.checked = checked);
+}
+function invertLibs(){
+  document.querySelectorAll('#lib-list input[type=checkbox]').forEach(cb => cb.checked = !cb.checked);
+}
+</script>
+{% endblock %}

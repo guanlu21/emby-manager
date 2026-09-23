@@ -21,6 +21,7 @@
 
 <div class="row-inline" style="margin-bottom:10px">
   <button type="button" class="btn small" onclick="batchExtend()">批量续期</button>
+  <button type="button" class="btn small" onclick="batchLibraries()">批量设置媒体库</button>
   <button type="button" class="btn small warn" onclick="batchAction('disable', '确认批量停用选中的用户？')">批量停用</button>
   <button type="button" class="btn small ok" onclick="batchAction('enable', '确认批量启用选中的用户？')">批量启用</button>
   <button type="button" class="btn small danger" onclick="batchAction('delete', '确认从 Emby 批量删除选中的用户？此操作不可恢复！')">批量删除</button>
@@ -71,6 +72,10 @@
         <a class="btn small" href="/users/{{ u.id }}/edit">编辑</a>
         <form class="inline" method="post" action="/users/{{ u.id }}/extend" onsubmit="return promptExtend(event, this)">
           <button class="btn small" type="submit">续期</button>
+        </form>
+        <form class="inline" method="post" action="/users/{{ u.id }}/extend-minutes" onsubmit="return confirm('确认为 {{ u.username }} 增加 15 分钟使用期限？');">
+          <input type="hidden" name="minutes" value="15">
+          <button class="btn small" type="submit">+15分钟</button>
         </form>
         {% if u.status == 'active' %}
         <form class="inline" method="post" action="/users/{{ u.id }}/disable" onsubmit="return confirm('确认停用该用户？');">

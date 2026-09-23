@@ -56,6 +56,15 @@ function batchExtend() {
   form.submit();
 }
 
+function batchLibraries() {
+  const ids = getSelectedUserIds();
+  if (ids.length === 0) {
+    alert("请先在列表里勾选要设置媒体库的用户");
+    return;
+  }
+  window.location.href = "/users/batch-libraries?ids=" + ids.join(",");
+}
+
 function batchAction(action, confirmMsg) {
   const ids = getSelectedUserIds();
   if (ids.length === 0) {
