@@ -22,6 +22,20 @@
 </div>
 {% endif %}
 
+{% if mode == "edit" and missing_lib_groups %}
+<div class="alert warn">
+  检测到 <b>{{ missing_lib_groups|join('、') }}</b> 这几个库，目前只有"聚合库"本身生效，底下真正装内容的
+  物理库（带路径的那些条目）一个都没勾——这就是"库能看到入口，但里面是空的"的原因。下面的勾选框已经
+  帮你自动补勾好了，不用手动再找，直接拉到底部点「保存修改」即可修复。
+</div>
+{% endif %}
+{% if mode == "edit" and live_policy and not live_policy.error %}
+<p class="muted small">
+  Emby 里当前实际生效的媒体库：{{ live_policy.matched_library_names|join('、') if live_policy.matched_library_names else ('不限制（允许访问所有媒体库）' if live_policy.enable_all_folders else '（无）') }}
+  ——保存后如果想确认改动是否真的生效，刷新一下这个编辑页面，看这里的内容有没有更新即可，不用再跑去 Emby 后台核对。
+</p>
+{% endif %}
+
 <form class="card" method="post" action="{{
     '/users' if mode == 'new'
     else ('/users/import/' + emby_user_id if mode == 'import'

@@ -567,6 +567,23 @@ def do_import_user(
 
 # ---------------- 编辑用户 ----------------
 
+def _find_missing_child_groups(selected_ids, libraries: list) -> list:
+    """
+    找出"聚合库本身被选中了，但它名下带路径的物理库一个都没选中"的分组
+    名字列表，用于在编辑页面上明确提示管理员：这个库现在能看到入口，
+    但里面其实是空的（真正装内容的物理库还没勾）。
+    """
+    selected_ids = set(selected_ids)
+    missing = []
+    for lib in libraries:
+        if lib.get("is_pathed") or lib.get("Id") not in selected_ids:
+            continue
+        children = [c for c in libraries if c.get("is_pathed") and c.get("group_key") == lib["Name"]]
+        if children and not any(c["Id"] in selected_ids for c in children):
+            missing.append(lib["Name"])
+    return missing
+
+
 def _expand_selected_library_ids(selected_ids, libraries: list) -> set:
     """
     如果一个"聚合库"本身在选中列表里，自动把它下面那些带路径的物理库
@@ -611,10 +628,14 @@ def edit_user_page(request: Request, user_id: int, error: str = ""):
                 selected_lib_ids = live_policy.get("enabled_folder_ids") or []
         except EmbyError as e:
             live_policy = {"error": str(e)}
+    # 先按"当前实际生效的原始状态"检查有没有"只勾了聚合库、没勾物理库"
+    # 的情况，用于页面上明确提示；再把物理库自动补勾上，用于勾选框的
+    # 默认展示状态（方便管理员直接点保存就能修复）。
+    missing_lib_groups = _find_missing_child_groups(selected_lib_ids, libraries)
     selected_lib_ids = _expand_selected_library_ids(selected_lib_ids, libraries)
     return render(request, "user_form.html", mode="edit", user=u, libraries=libraries,
                   selected_lib_ids=selected_lib_ids, error=error, form=None,
-                  live_policy=live_policy)
+                  live_policy=live_policy, missing_lib_groups=missing_lib_groups)
 
 
 @app.post("/users/{user_id}/update")
