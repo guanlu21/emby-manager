@@ -83,14 +83,19 @@ user03" style="width:100%; padding:9px 10px; border:1px solid var(--border); bor
   </div>
   <div class="lib-list" id="lib-list">
     {% for lib in libraries %}
-    <label class="checkbox">
-      <input type="checkbox" name="library_ids" value="{{ lib.Id }}">
+    <label class="checkbox{{ ' lib-child' if lib.is_pathed else '' }}">
+      <input type="checkbox" name="library_ids" value="{{ lib.Id }}"
+             data-group="{{ lib.group_key }}" data-pathed="{{ 'true' if lib.is_pathed else 'false' }}"
+             onchange="onLibCheckboxChange(this)">
       {{ lib.Name }}
     </label>
     {% else %}
     <p class="muted">未能获取媒体库列表，请检查「设置」中的 Emby 连接信息。</p>
     {% endfor %}
   </div>
+  <p class="muted small">如果某一条库名下面紧跟着的选项显示的是完整路径（比如"/xxx/115/电影/国产"这种），
+    说明这是把好几个网盘目录合并展示出来的"聚合库"——勾选/取消干净短名字那一条时，下面这些带路径的会
+    自动帮你一起勾上/取消，两边都勾上才是真正能看到内容，不然库能进去但里面是空的。</p>
 
   <label>下载权限</label>
   <div class="row-inline">
@@ -131,6 +136,14 @@ function setAllLibs(checked){
 }
 function invertLibs(){
   document.querySelectorAll('#lib-list input[type=checkbox]').forEach(cb => cb.checked = !cb.checked);
+}
+function onLibCheckboxChange(checkbox){
+  if (checkbox.dataset.pathed === 'true') return;
+  const group = checkbox.dataset.group;
+  const checked = checkbox.checked;
+  document.querySelectorAll('#lib-list input[type=checkbox][data-pathed="true"]').forEach(cb => {
+    if (cb.dataset.group === group) cb.checked = checked;
+  });
 }
 </script>
 {% endblock %}

@@ -137,6 +137,35 @@ def _calc_expire_at(duration_preset: str, expire_date: str, base_ts: int = None)
     return None
 
 
+def _annotate_library_groups(libraries: list) -> list:
+    """
+    给每个媒体库标注一个"分组 key"（group_key）和是否为"带路径的物理库"
+    （is_pathed），用于新建/编辑/批量勾选媒体库页面上"点一下聚合库，自动
+    帮你把它下面的物理库也一起勾上"这个联动逻辑。
+
+    背景：像"国产""港台""欧美"这类库，很多时候是把好几个网盘挂载目录
+    （115/天翼/移动/夸克…）合并展示出来的"聚合库"。Emby 接口会把这个聚合
+    库本身返回成一条（Name 就是"国产"这种干净的短名字），同时把它下面
+    每一个物理挂载目录也各自返回成一条可勾选的库，Name 通常带着完整
+    路径，例如 "/Litepan/strm/115/电影/国产"——注意路径的最后一段刚好
+    跟聚合库同名。
+
+    过去很容易出现"只勾了聚合库本身，没勾这些带路径的物理库"，结果就是
+    用户能看到这个库入口，但里面一部影片都没有（因为真正装内容的是那些
+    物理库，不是聚合库本身）。这里用"路径最后一段"当分组 key 把两者关联
+    起来，前端据此做联动勾选，从源头避免漏勾。
+    """
+    result = []
+    for lib in libraries:
+        lib = dict(lib)
+        name = lib.get("Name") or ""
+        is_pathed = "/" in name
+        lib["is_pathed"] = is_pathed
+        lib["group_key"] = name.rstrip("/").rsplit("/", 1)[-1] if is_pathed else name
+        result.append(lib)
+    return result
+
+
 def _apply_library_order(libraries: list) -> list:
     """
     按管理员在「设置」页里自定义的顺序，对媒体库列表重新排序，用于新建/
@@ -155,7 +184,8 @@ def _apply_library_order(libraries: list) -> list:
         legacy_id = str(lib.get("LegacyId")) if lib.get("LegacyId") is not None else ""
         return order_index.get(current_id, order_index.get(legacy_id, len(order)))
 
-    return sorted(libraries, key=sort_key)
+    ordered = sorted(libraries, key=sort_key)
+    return _annotate_library_groups(ordered)
 
 
 _PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -473,6 +503,7 @@ def import_user_page(request: Request, emby_user_id: str, error: str = ""):
         selected_lib_ids = [l["Id"] for l in libraries]
     else:
         selected_lib_ids = policy.get("EnabledFolders") or []
+    selected_lib_ids = _expand_selected_library_ids(selected_lib_ids, libraries)
 
     fake_user = {
         "id": None,
@@ -536,6 +567,24 @@ def do_import_user(
 
 # ---------------- 编辑用户 ----------------
 
+def _expand_selected_library_ids(selected_ids, libraries: list) -> set:
+    """
+    如果一个"聚合库"本身在选中列表里，自动把它下面那些带路径的物理库
+    也一并视为选中——这样即使是历史上"只勾了聚合库、没勾物理库"导致
+    库内容为空的老用户，一打开编辑页面，勾选框就已经是修好的状态，
+    管理员不需要再去找具体是哪几个物理库要补勾，直接保存即可修复。
+    """
+    selected_ids = set(selected_ids)
+    selected_group_keys = {
+        lib["Name"] for lib in libraries
+        if not lib.get("is_pathed") and lib.get("Id") in selected_ids
+    }
+    for lib in libraries:
+        if lib.get("is_pathed") and lib.get("group_key") in selected_group_keys:
+            selected_ids.add(lib["Id"])
+    return selected_ids
+
+
 @app.get("/users/{user_id}/edit", response_class=HTMLResponse)
 def edit_user_page(request: Request, user_id: int, error: str = ""):
     guard = _guard(request)
@@ -562,6 +611,7 @@ def edit_user_page(request: Request, user_id: int, error: str = ""):
                 selected_lib_ids = live_policy.get("enabled_folder_ids") or []
         except EmbyError as e:
             live_policy = {"error": str(e)}
+    selected_lib_ids = _expand_selected_library_ids(selected_lib_ids, libraries)
     return render(request, "user_form.html", mode="edit", user=u, libraries=libraries,
                   selected_lib_ids=selected_lib_ids, error=error, form=None,
                   live_policy=live_policy)
