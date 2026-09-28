@@ -1132,6 +1132,215 @@ def save_emby_settings(request: Request, emby_url: str = Form(...), emby_api_key
         return RedirectResponse(f"/settings?error=连接失败: {e}", status_code=303)
 
 
+# ---------------- 迁移到新 Emby 服务器 ----------------
+
+def _lib_name_maps(libraries: list):
+    """id(Id/Guid/LegacyId 都算) -> 库名 / 库名 -> 库Id"""
+    id_to_name = {}
+    for lib in libraries:
+        for v in (lib.get("Id"), lib.get("Guid"), lib.get("LegacyId")):
+            if v is not None:
+                id_to_name[str(v)] = lib.get("Name")
+    name_to_id = {}
+    for lib in libraries:
+        if lib.get("Name") and lib.get("Name") not in name_to_id:
+            name_to_id[lib["Name"]] = lib["Id"]
+    return id_to_name, name_to_id
+
+
+@app.get("/migrate", response_class=HTMLResponse)
+def migrate_page(request: Request):
+    guard = _guard(request)
+    if guard:
+        return guard
+    users = db.list_users()
+    return render(request, "migrate.html", user_count=len(users),
+                  current_url=db.get_setting("emby_url") or "", results=None,
+                  error="", form={})
+
+
+@app.post("/migrate/run", response_class=HTMLResponse)
+def migrate_run(request: Request, new_url: str = Form(...), new_api_key: str = Form(...),
+                migrate_libs: str = Form(None)):
+    """
+    把本地管理的所有用户迁移到一个全新安装的 Emby 服务器：
+    在新服务器上重建账号（带原密码、下载/上传权限、停用状态），按库名映射媒体库，
+    全部成功后才把本地记录的 Emby 用户 ID 换成新服务器的，并切换设置里的服务器地址。
+    任何一个用户失败则不改动本地数据（可修复问题后直接重跑，已在新服务器上建好的
+    同名账号会被复用，不会重复创建）。
+    """
+    guard = _guard(request)
+    if guard:
+        return guard
+    users = db.list_users()
+    form = {"new_url": new_url, "new_api_key": new_api_key, "migrate_libs": bool(migrate_libs)}
+
+    def fail_page(msg, results=None, lib_results=None):
+        return render(request, "migrate.html", user_count=len(users),
+                      current_url=db.get_setting("emby_url") or "", results=results,
+                      lib_results=lib_results, error=msg, form=form)
+
+    new_url = new_url.strip().rstrip("/")
+    if new_url == (db.get_setting("emby_url") or "").rstrip("/"):
+        return fail_page("新服务器地址和当前正在使用的地址相同，请填写新 Emby 的地址。")
+    try:
+        new_client = EmbyClient(new_url, new_api_key.strip())
+        new_info = new_client.test_connection()
+    except EmbyError as e:
+        return fail_page(f"连接新服务器失败: {e}")
+
+    old_client = _get_client_or_none()
+
+    # 0) 先把旧服务器的媒体库（名称/类型/全部路径/库选项）在新服务器上建出来；
+    #    新服务器已有同名库则跳过。库建失败就中止，不动用户和本地数据。
+    lib_results = []
+    if migrate_libs:
+        if not old_client:
+            return fail_page("迁移媒体库需要读取旧服务器，但旧服务器未配置/不可用。可取消勾选「同时迁移媒体库」后重试。")
+        try:
+            old_vfs = old_client.list_virtual_folders()
+            new_vf_names = {f.get("Name") for f in new_client.list_virtual_folders()}
+        except EmbyError as e:
+            return fail_page(f"读取媒体库定义失败: {e}")
+        for vf in old_vfs:
+            name = vf.get("Name")
+            ctype = vf.get("CollectionType")
+            locs = vf.get("Locations") or []
+            lr = {"name": name, "ok": True, "note": ""}
+            if ctype in ("boxsets", "playlists") or not locs:
+                lr["note"] = "系统自动生成的库/无路径，已跳过"
+            elif name in new_vf_names:
+                lr["note"] = "新服务器已有同名库，已跳过"
+            else:
+                try:
+                    new_client.create_virtual_folder(name, ctype, locs, vf.get("LibraryOptions") or {})
+                    lr["note"] = f"已创建（{len(locs)} 个路径）"
+                except EmbyError as e:
+                    lr["ok"] = False
+                    lr["note"] = f"失败: {e}"
+            lib_results.append(lr)
+        if any(not lr["ok"] for lr in lib_results):
+            return fail_page("有媒体库创建失败，用户和本地数据均未改动。请根据提示（多为路径映射/读权限问题）处理后重试，已建好的库会被跳过。",
+                             lib_results=lib_results)
+
+    try:
+        new_libs = new_client.list_libraries()
+        new_by_name = {(eu.get("Name") or "").lower(): eu.get("Id") for eu in new_client.list_emby_users()}
+    except EmbyError as e:
+        return fail_page(f"读取新服务器信息失败: {e}", lib_results=lib_results)
+
+    old_libs, old_warning = [], ""
+    if old_client:
+        try:
+            old_libs = old_client.list_libraries()
+        except EmbyError as e:
+            old_warning = f"旧服务器读取媒体库失败（{e}），将只能按本地记录迁移媒体库权限。"
+    else:
+        old_warning = "旧服务器未配置/不可用，将只能按本地记录迁移媒体库权限。"
+    old_id_to_name, _ = _lib_name_maps(old_libs)
+    _, new_name_to_id = _lib_name_maps(new_libs)
+    all_new_ids = [lib["Id"] for lib in new_libs]
+
+    # 库显示顺序：旧顺序按库名映射到新库，剩下的新库追加在后面
+    top_new = [lib for lib in _annotate_library_groups(new_libs) if not lib.get("is_pathed")]
+    new_order = []
+    for old_id in json.loads(db.get_setting("library_order") or "[]"):
+        nid = new_name_to_id.get(old_id_to_name.get(str(old_id)))
+        if nid and nid not in new_order and any(t["Id"] == nid for t in top_new):
+            new_order.append(nid)
+    for t in top_new:
+        if t["Id"] not in new_order:
+            new_order.append(t["Id"])
+
+    results = []
+    for u in users:
+        r = {"db_id": u["id"], "username": u["username"], "ok": False, "note": [],
+             "new_emby_id": None, "password": u["password"] or "", "generated": False}
+        try:
+            # 1) 该用户原本可访问的库（优先取旧服务器实时状态，取不到用本地记录）
+            wanted_ids, all_folders = None, False
+            if old_client:
+                try:
+                    pol = old_client.get_user(u["emby_user_id"]).get("Policy", {}) or {}
+                    all_folders = bool(pol.get("EnableAllFolders"))
+                    wanted_ids = pol.get("EnabledFolders") or []
+                except EmbyError:
+                    wanted_ids = None
+            if wanted_ids is None:
+                wanted_ids = json.loads(u["library_ids"] or "[]")
+            if all_folders:
+                new_lib_ids = list(all_new_ids)
+                r["note"].append("原为不限制媒体库，已授予新服务器全部库")
+            else:
+                new_lib_ids, unmatched = [], []
+                for lid in wanted_ids:
+                    name = old_id_to_name.get(str(lid))
+                    nid = new_name_to_id.get(name) if name else None
+                    if nid:
+                        if nid not in new_lib_ids:
+                            new_lib_ids.append(nid)
+                    else:
+                        unmatched.append(name or str(lid))
+                if unmatched:
+                    r["note"].append("新服务器找不到对应库: " + "、".join(unmatched))
+
+            # 2) 建号（新服务器已有同名账号则复用）+ 密码
+            new_id = new_by_name.get(u["username"].lower())
+            if new_id:
+                r["note"].append("新服务器已有同名账号，已复用")
+            else:
+                new_id = new_client.create_user(u["username"])["Id"]
+                new_by_name[u["username"].lower()] = new_id
+            if not r["password"]:
+                r["password"] = _gen_random_password()
+                r["generated"] = True
+            new_client.set_password(new_id, r["password"])
+            new_client.hide_user_from_login(new_id)
+            new_client.set_libraries_and_permissions(
+                new_id, new_lib_ids, bool(u["enable_download"]),
+                bool(u["enable_download_transcode"]), bool(u["enable_upload"]),
+            )
+            new_client.set_disabled(new_id, u["status"] in ("disabled", "expired"))
+            try:
+                new_client.set_user_library_order(new_id, new_order)
+            except EmbyError:
+                r["note"].append("库显示顺序未能同步")
+            r["new_emby_id"] = new_id
+            r["ok"] = True
+        except EmbyError as e:
+            r["note"].append(f"失败: {e}")
+        results.append(r)
+
+    failed = [r for r in results if not r["ok"]]
+    if failed:
+        return fail_page(
+            f"{len(failed)} 个用户迁移失败，本地数据和服务器设置均未改动。"
+            "处理问题后可以直接重新点击迁移（已在新服务器建好的账号会被复用）。",
+            results=results, lib_results=lib_results)
+
+    # 全部成功：提交本地数据 + 切换服务器
+    for r in results:
+        updates = {"emby_user_id": r["new_emby_id"]}
+        if r["generated"]:
+            updates["password"] = r["password"]
+        db.update_user(r["db_id"], **updates)
+    db.set_setting("emby_url", new_url)
+    db.set_setting("emby_api_key", new_api_key.strip())
+    db.set_setting("library_order", json.dumps(new_order))
+    db.add_log("-", "migrate", f"迁移 {len(results)} 个用户到 {new_url}")
+    scan_note = ""
+    if migrate_libs and any(lr["note"].startswith("已创建") for lr in lib_results):
+        try:
+            new_client.refresh_library()
+            scan_note = "已通知新服务器开始扫描媒体库，扫描完成前库里可能暂时没有内容。"
+        except EmbyError:
+            scan_note = "请到新 Emby 后台手动触发一次媒体库扫描。"
+    old_warning = (old_warning + " " + scan_note).strip()
+    return render(request, "migrate.html", user_count=len(users), current_url=new_url,
+                  results=results, lib_results=lib_results, error="", form={}, done=True, old_warning=old_warning,
+                  new_server=f"{new_info.get('ServerName', 'Emby')} v{new_info.get('Version', '')}")
+
+
 @app.post("/settings/password")
 def change_password(request: Request, password: str = Form(...), password2: str = Form(...)):
     guard = _guard(request)

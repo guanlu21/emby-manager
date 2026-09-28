@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-head">
+  <h2>迁移到新 Emby</h2>
+  <a class="btn" href="/settings">返回设置</a>
+</div>
+
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if done %}
+<div class="alert ok">
+  迁移完成：{{ results|length }} 个用户已在新服务器（{{ new_server }}）上建好，本地记录和服务器设置已切换到新 Emby。
+  {% if old_warning %}<br>{{ old_warning }}{% endif %}
+</div>
+{% endif %}
+
+{% if not done %}
+<div class="card" style="max-width:760px">
+  <p class="muted small">
+    适用于把用户迁到一个<b>全新安装</b>的 Emby 服务器。当前共有 <b>{{ user_count }}</b> 个用户（不含已删除）会被迁移，
+    当前服务器：{{ current_url or '未配置' }}。
+  </p>
+  <ul class="muted small">
+    <li>在新服务器上按用户名重建账号，沿用原密码、下载/上传权限、停用/到期状态。</li>
+    <li>勾选「同时迁移媒体库」时，会读取旧服务器的媒体库（名称、内容类型、合并库的<b>全部路径</b>、库选项）并在新服务器上创建；新服务器已有同名库则跳过。<b>新 Emby 容器需要先配好同样的路径映射</b>（如 /Litepan/strm），否则会报路径无效。</li>
+    <li>用户的媒体库权限按库名对应到新服务器的库（子目录按完整路径匹配）；对应不上的会在结果里列出。</li>
+    <li>没有记录密码的用户（从 Emby 导入的老用户）会生成新密码，结果里会列出，需要你通知他们。</li>
+    <li>全部成功才会切换本地记录和服务器地址；任何一个失败都不改动本地数据，可以直接重跑。</li>
+    <li>迁移前建议先备份 <code>/app/data/app.db</code>。旧服务器需要还能访问，才能读取用户当前的媒体库权限。</li>
+  </ul>
+  <form method="post" action="/migrate/run" onsubmit="return confirm('确认开始迁移？');">
+    <label>新 Emby 服务器地址</label>
+    <input type="text" name="new_url" value="{{ form.new_url or '' }}" placeholder="http://192.168.1.20:8096" required>
+    <label>新 Emby API Key</label>
+    <input type="text" name="new_api_key" value="{{ form.new_api_key or '' }}" required>
+    <label class="checkbox"><input type="checkbox" name="migrate_libs" value="1" {% if form.migrate_libs is not defined or form.migrate_libs %}checked{% endif %}> 同时迁移媒体库（在新服务器上创建旧服务器的所有媒体库）</label>
+    <button type="submit" class="btn primary" style="margin-top:12px">开始迁移</button>
+  </form>
+</div>
+{% endif %}
+
+{% if lib_results %}
+<div class="card" style="max-width:900px">
+  <h3>媒体库迁移结果</h3>
+  <table>
+    <thead><tr><th>媒体库</th><th>结果</th><th>说明</th></tr></thead>
+    <tbody>
+      {% for lr in lib_results %}
+      <tr>
+        <td>{{ lr.name }}</td>
+        <td>{% if lr.ok %}<span class="badge-ok">成功</span>{% else %}<span style="color:#dc2626">失败</span>{% endif %}</td>
+        <td class="small">{{ lr.note }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if results %}
+<div class="card" style="max-width:900px">
+  <h3>用户迁移结果</h3>
+  <table>
+    <thead><tr><th>用户名</th><th>结果</th><th>说明</th></tr></thead>
+    <tbody>
+      {% for r in results %}
+      <tr>
+        <td>{{ r.username }}</td>
+        <td>{% if r.ok %}<span class="badge-ok">成功</span>{% else %}<span style="color:#dc2626">失败</span>{% endif %}</td>
+        <td class="small">{{ r.note|join('；') }}{% if r.generated %}{{ '；' if r.note }}新密码: <b>{{ r.password }}</b>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% set gen = results|selectattr('generated')|list %}
+  {% if done and gen %}
+  <label>需要通知的新密码清单（用户名 密码）</label>
+  <textarea readonly rows="{{ gen|length + 1 }}" style="width:100%">{% for r in gen %}{{ r.username }} {{ r.password }}
+{% endfor %}</textarea>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -90,6 +90,52 @@ class EmbyClient:
                 })
             return result
 
+    def list_virtual_folders(self):
+        """媒体库完整定义（名称/内容类型/路径列表/LibraryOptions），用于迁移媒体库。"""
+        data = self._request("GET", "/Library/VirtualFolders").json()
+        if isinstance(data, dict):
+            data = data.get("Items") or []
+        return data
+
+    def create_virtual_folder(self, name, collection_type, locations, library_options):
+        """
+        在本服务器上新建一个媒体库（按 Emby 网页端添加媒体库时发的请求：
+        query 带 name/collectionType/refreshLibrary，body 是 {LibraryOptions}，
+        路径放在 LibraryOptions.PathInfos 里）。合并库有多个路径时全部写进 PathInfos。
+        创建后回读校验路径，缺的用 /Library/VirtualFolders/Paths 补加，仍失败则抛错。
+        """
+        opts = dict(library_options or {})
+        infos = list(opts.get("PathInfos") or [])
+        have = {i.get("Path") for i in infos}
+        for path in locations or []:
+            if path not in have:
+                infos.append({"Path": path})
+        opts["PathInfos"] = infos
+        params = {"name": name, "refreshLibrary": "false"}
+        if collection_type:
+            params["collectionType"] = collection_type
+        self._request("POST", "/Library/VirtualFolders", params=params,
+                      json={"LibraryOptions": opts})
+
+        created = next((f for f in self.list_virtual_folders() if f.get("Name") == name), None)
+        if not created:
+            raise EmbyError(f"媒体库 {name} 创建后在新服务器上没有读到，请到 Emby 后台确认")
+        existing = set(created.get("Locations") or [])
+        for path in locations or []:
+            if path not in existing:
+                self._request("POST", "/Library/VirtualFolders/Paths", json={
+                    "Id": created.get("ItemId") or created.get("Id"),
+                    "Name": name, "Path": path, "PathInfo": {"Path": path},
+                    "RefreshLibrary": False,
+                })
+        final = next((f for f in self.list_virtual_folders() if f.get("Name") == name), created)
+        missing = [p for p in (locations or []) if p not in set(final.get("Locations") or [])]
+        if missing:
+            raise EmbyError(f"媒体库 {name} 有路径没加上: {missing}，请检查路径映射/读权限")
+
+    def refresh_library(self):
+        self._request("POST", "/Library/Refresh")
+
     def list_emby_users(self):
         resp = self._request("GET", "/Users")
         return resp.json()
