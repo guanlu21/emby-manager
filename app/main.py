@@ -1156,33 +1156,28 @@ def migrate_page(request: Request):
     users = db.list_users()
     return render(request, "migrate.html", user_count=len(users),
                   current_url=db.get_setting("emby_url") or "", results=None,
-                  error="", form={})
+                  lib_results=None, error="", form={})
 
 
-@app.post("/migrate/run", response_class=HTMLResponse)
-def migrate_run(request: Request, new_url: str = Form(...), new_api_key: str = Form(...),
-                migrate_libs: str = Form(None)):
+@app.post("/migrate/libraries", response_class=HTMLResponse)
+def migrate_libraries_run(request: Request, new_url: str = Form(...), new_api_key: str = Form(...)):
     """
-    把本地管理的所有用户迁移到一个全新安装的 Emby 服务器：
-    在新服务器上重建账号（带原密码、下载/上传权限、停用状态），按库名映射媒体库，
-    全部成功后才把本地记录的 Emby 用户 ID 换成新服务器的，并切换设置里的服务器地址。
-    任何一个用户失败则不改动本地数据（可修复问题后直接重跑，已在新服务器上建好的
-    同名账号会被复用，不会重复创建）。
+    只迁移媒体库结构（名称/内容类型/全部路径/库选项），跟用户迁移完全分开、
+    互不影响：不碰本地用户数据，也不会切换设置里的服务器地址——方便先把库
+    建好、等新服务器扫描完成、确认内容都在之后，再单独去迁移用户。
     """
     guard = _guard(request)
     if guard:
         return guard
     users = db.list_users()
-    form = {"new_url": new_url, "new_api_key": new_api_key, "migrate_libs": bool(migrate_libs)}
+    form = {"new_url": new_url, "new_api_key": new_api_key}
 
-    def fail_page(msg, results=None, lib_results=None):
+    def fail_page(msg, lib_results=None):
         return render(request, "migrate.html", user_count=len(users),
-                      current_url=db.get_setting("emby_url") or "", results=results,
+                      current_url=db.get_setting("emby_url") or "", results=None,
                       lib_results=lib_results, error=msg, form=form)
 
     new_url = new_url.strip().rstrip("/")
-    if new_url == (db.get_setting("emby_url") or "").rstrip("/"):
-        return fail_page("新服务器地址和当前正在使用的地址相同，请填写新 Emby 的地址。")
     try:
         new_client = EmbyClient(new_url, new_api_key.strip())
         new_info = new_client.test_connection()
@@ -1190,45 +1185,80 @@ def migrate_run(request: Request, new_url: str = Form(...), new_api_key: str = F
         return fail_page(f"连接新服务器失败: {e}")
 
     old_client = _get_client_or_none()
-
-    # 0) 先把旧服务器的媒体库（名称/类型/全部路径/库选项）在新服务器上建出来；
-    #    新服务器已有同名库则跳过。库建失败就中止，不动用户和本地数据。
-    lib_results = []
-    if migrate_libs:
-        if not old_client:
-            return fail_page("迁移媒体库需要读取旧服务器，但旧服务器未配置/不可用。可取消勾选「同时迁移媒体库」后重试。")
-        try:
-            old_vfs = old_client.list_virtual_folders()
-            new_vf_names = {f.get("Name") for f in new_client.list_virtual_folders()}
-        except EmbyError as e:
-            return fail_page(f"读取媒体库定义失败: {e}")
-        for vf in old_vfs:
-            name = vf.get("Name")
-            ctype = vf.get("CollectionType")
-            locs = vf.get("Locations") or []
-            lr = {"name": name, "ok": True, "note": ""}
-            if ctype in ("boxsets", "playlists") or not locs:
-                lr["note"] = "系统自动生成的库/无路径，已跳过"
-            elif name in new_vf_names:
-                lr["note"] = "新服务器已有同名库，已跳过"
-            else:
-                try:
-                    new_client.create_virtual_folder(name, ctype, locs, vf.get("LibraryOptions") or {})
-                    lr["note"] = f"已创建（{len(locs)} 个路径）"
-                except EmbyError as e:
-                    lr["ok"] = False
-                    lr["note"] = f"失败: {e}"
-            lib_results.append(lr)
-        if any(not lr["ok"] for lr in lib_results):
-            return fail_page("有媒体库创建失败，用户和本地数据均未改动。请根据提示（多为路径映射/读权限问题）处理后重试，已建好的库会被跳过。",
-                             lib_results=lib_results)
-
+    if not old_client:
+        return fail_page("旧服务器未配置/不可用，无法读取媒体库定义。")
     try:
+        old_vfs = old_client.list_virtual_folders()
+        new_vf_names = {f.get("Name") for f in new_client.list_virtual_folders()}
+    except EmbyError as e:
+        return fail_page(f"读取媒体库定义失败: {e}")
+
+    lib_results = []
+    for vf in old_vfs:
+        name = vf.get("Name")
+        ctype = vf.get("CollectionType")
+        locs = vf.get("Locations") or []
+        lr = {"name": name, "ok": True, "note": ""}
+        if ctype in ("boxsets", "playlists") or not locs:
+            lr["note"] = "系统自动生成的库/无路径，已跳过"
+        elif name in new_vf_names:
+            lr["note"] = "新服务器已有同名库，已跳过"
+        else:
+            try:
+                new_client.create_virtual_folder(name, ctype, locs, vf.get("LibraryOptions") or {})
+                lr["note"] = f"已创建（{len(locs)} 个路径）"
+            except EmbyError as e:
+                lr["ok"] = False
+                lr["note"] = f"失败: {e}"
+        lib_results.append(lr)
+
+    ok_all = all(lr["ok"] for lr in lib_results)
+    note = ""
+    if ok_all and any(lr["note"].startswith("已创建") for lr in lib_results):
+        try:
+            new_client.refresh_library()
+            note = "已通知新服务器开始扫描媒体库，扫描完成前库里可能暂时没有内容。"
+        except EmbyError:
+            note = "请到新 Emby 后台手动触发一次媒体库扫描。"
+    return render(request, "migrate.html", user_count=len(users),
+                  current_url=db.get_setting("emby_url") or "", results=None,
+                  lib_results=lib_results, form=form, lib_done=ok_all,
+                  error="" if ok_all else "有媒体库创建失败，请根据提示（多为路径映射/读权限问题）处理后重新点击「迁移媒体库」，已建好的库会被跳过。",
+                  old_warning=note, new_server=f"{new_info.get('ServerName', 'Emby')} v{new_info.get('Version', '')}")
+
+
+@app.post("/migrate/users", response_class=HTMLResponse)
+def migrate_users_run(request: Request, new_url: str = Form(...), new_api_key: str = Form(...)):
+    """
+    只迁移用户：在新服务器按用户名重建账号（带原密码、下载/上传权限、停用状态），
+    按库名把媒体库权限对应到新服务器**已有**的库上——迁移媒体库是独立的一步，
+    这里不会顺带创建库；如果新服务器上还没有对应的库，会在结果里提示"找不到对应库"，
+    之后单独跑一次「迁移媒体库」、或手动建好库后，重新点一次这里即可补上权限。
+    全部用户都成功后，才把本地记录切到新服务器；任何一个失败都不改动本地数据。
+    """
+    guard = _guard(request)
+    if guard:
+        return guard
+    users = db.list_users()
+    form = {"new_url": new_url, "new_api_key": new_api_key}
+
+    def fail_page(msg, results=None):
+        return render(request, "migrate.html", user_count=len(users),
+                      current_url=db.get_setting("emby_url") or "", results=results,
+                      lib_results=None, error=msg, form=form)
+
+    new_url = new_url.strip().rstrip("/")
+    if new_url == (db.get_setting("emby_url") or "").rstrip("/"):
+        return fail_page("新服务器地址和当前正在使用的地址相同，请填写新 Emby 的地址。")
+    try:
+        new_client = EmbyClient(new_url, new_api_key.strip())
+        new_info = new_client.test_connection()
         new_libs = new_client.list_libraries()
         new_by_name = {(eu.get("Name") or "").lower(): eu.get("Id") for eu in new_client.list_emby_users()}
     except EmbyError as e:
-        return fail_page(f"读取新服务器信息失败: {e}", lib_results=lib_results)
+        return fail_page(f"连接新服务器失败: {e}")
 
+    old_client = _get_client_or_none()
     old_libs, old_warning = [], ""
     if old_client:
         try:
@@ -1315,8 +1345,8 @@ def migrate_run(request: Request, new_url: str = Form(...), new_api_key: str = F
     if failed:
         return fail_page(
             f"{len(failed)} 个用户迁移失败，本地数据和服务器设置均未改动。"
-            "处理问题后可以直接重新点击迁移（已在新服务器建好的账号会被复用）。",
-            results=results, lib_results=lib_results)
+            "处理问题后可以直接重新点击「迁移用户」（已在新服务器建好的账号会被复用）。",
+            results=results)
 
     # 全部成功：提交本地数据 + 切换服务器
     for r in results:
@@ -1328,16 +1358,8 @@ def migrate_run(request: Request, new_url: str = Form(...), new_api_key: str = F
     db.set_setting("emby_api_key", new_api_key.strip())
     db.set_setting("library_order", json.dumps(new_order))
     db.add_log("-", "migrate", f"迁移 {len(results)} 个用户到 {new_url}")
-    scan_note = ""
-    if migrate_libs and any(lr["note"].startswith("已创建") for lr in lib_results):
-        try:
-            new_client.refresh_library()
-            scan_note = "已通知新服务器开始扫描媒体库，扫描完成前库里可能暂时没有内容。"
-        except EmbyError:
-            scan_note = "请到新 Emby 后台手动触发一次媒体库扫描。"
-    old_warning = (old_warning + " " + scan_note).strip()
     return render(request, "migrate.html", user_count=len(users), current_url=new_url,
-                  results=results, lib_results=lib_results, error="", form={}, done=True, old_warning=old_warning,
+                  results=results, lib_results=None, error="", form={}, done=True, old_warning=old_warning,
                   new_server=f"{new_info.get('ServerName', 'Emby')} v{new_info.get('Version', '')}")
 
 

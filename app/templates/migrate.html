@@ -7,37 +7,60 @@
 </div>
 
 {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if lib_done %}
+<div class="alert ok">
+  媒体库迁移完成（新服务器：{{ new_server }}）。{% if old_warning %}{{ old_warning }}{% endif %}
+  确认新服务器扫描完成、库里内容正常之后，再去下面迁移用户。
+</div>
+{% endif %}
 {% if done %}
 <div class="alert ok">
-  迁移完成：{{ results|length }} 个用户已在新服务器（{{ new_server }}）上建好，本地记录和服务器设置已切换到新 Emby。
+  用户迁移完成：{{ results|length }} 个用户已在新服务器（{{ new_server }}）上建好，本地记录和服务器设置已切换到新 Emby。
   {% if old_warning %}<br>{{ old_warning }}{% endif %}
 </div>
 {% endif %}
 
-{% if not done %}
+<p class="muted small">
+  媒体库和用户是两个独立的步骤，互不影响，可以分开、任意顺序单独重跑。当前共有 <b>{{ user_count }}</b> 个用户
+  （不含已删除），当前服务器：{{ current_url or '未配置' }}。两步都需要填新服务器的地址和 API Key。
+</p>
+
 <div class="card" style="max-width:760px">
-  <p class="muted small">
-    适用于把用户迁到一个<b>全新安装</b>的 Emby 服务器。当前共有 <b>{{ user_count }}</b> 个用户（不含已删除）会被迁移，
-    当前服务器：{{ current_url or '未配置' }}。
-  </p>
+  <h3>第一步：迁移媒体库</h3>
   <ul class="muted small">
-    <li>在新服务器上按用户名重建账号，沿用原密码、下载/上传权限、停用/到期状态。</li>
-    <li>勾选「同时迁移媒体库」时，会读取旧服务器的媒体库（名称、内容类型、合并库的<b>全部路径</b>、库选项）并在新服务器上创建；新服务器已有同名库则跳过。<b>新 Emby 容器需要先配好同样的路径映射</b>（如 /Litepan/strm），否则会报路径无效。</li>
-    <li>用户的媒体库权限按库名对应到新服务器的库（子目录按完整路径匹配）；对应不上的会在结果里列出。</li>
-    <li>没有记录密码的用户（从 Emby 导入的老用户）会生成新密码，结果里会列出，需要你通知他们。</li>
-    <li>全部成功才会切换本地记录和服务器地址；任何一个失败都不改动本地数据，可以直接重跑。</li>
-    <li>迁移前建议先备份 <code>/app/data/app.db</code>。旧服务器需要还能访问，才能读取用户当前的媒体库权限。</li>
+    <li>读取旧服务器的媒体库（名称、内容类型、合并库的<b>全部路径</b>、库选项），在新服务器上创建；新服务器已有同名库则跳过。</li>
+    <li><b>新 Emby 容器需要先配好和旧服务器一样的路径映射</b>（如 /Litepan/strm）并有读权限，否则会报路径无效。</li>
+    <li>「合集」这类系统自动生成的库不会迁移，新服务器会自己生成。</li>
+    <li>只建库，不会创建/改动任何用户，也不会切换本工具正在使用的服务器地址——可以先跑这一步，等新服务器扫描完确认内容没问题，再单独去迁移用户。</li>
+    <li>可以重复点击：已建好的库会被跳过，不会重复创建。</li>
   </ul>
-  <form method="post" action="/migrate/run" onsubmit="return confirm('确认开始迁移？');">
+  <form method="post" action="/migrate/libraries" onsubmit="return confirm('确认开始迁移媒体库？');">
     <label>新 Emby 服务器地址</label>
     <input type="text" name="new_url" value="{{ form.new_url or '' }}" placeholder="http://192.168.1.20:8096" required>
     <label>新 Emby API Key</label>
     <input type="text" name="new_api_key" value="{{ form.new_api_key or '' }}" required>
-    <label class="checkbox"><input type="checkbox" name="migrate_libs" value="1" {% if form.migrate_libs is not defined or form.migrate_libs %}checked{% endif %}> 同时迁移媒体库（在新服务器上创建旧服务器的所有媒体库）</label>
-    <button type="submit" class="btn primary" style="margin-top:12px">开始迁移</button>
+    <button type="submit" class="btn primary" style="margin-top:12px">迁移媒体库</button>
   </form>
 </div>
-{% endif %}
+
+<div class="card" style="max-width:760px">
+  <h3>第二步：迁移用户</h3>
+  <ul class="muted small">
+    <li>在新服务器上按用户名重建账号，沿用原密码、下载/上传权限、停用/到期状态。</li>
+    <li>媒体库权限按<b>库名</b>对应到新服务器<b>已有</b>的库（子目录按完整路径匹配）——这一步不会顺带建库，
+      新服务器上还没有的库会在结果里提示"找不到对应库"，请先完成第一步或手动建好库，再重新点这里补上权限。</li>
+    <li>没有记录密码的用户（从 Emby 导入的老用户）会生成新密码，结果里会列出，需要你通知他们。</li>
+    <li>全部用户都成功才会切换本地记录和服务器地址；任何一个失败都不改动本地数据，可以直接重跑。</li>
+    <li>迁移前建议先备份 <code>/app/data/app.db</code>。旧服务器需要还能访问，才能读取用户当前的媒体库权限。</li>
+  </ul>
+  <form method="post" action="/migrate/users" onsubmit="return confirm('确认开始迁移用户？');">
+    <label>新 Emby 服务器地址</label>
+    <input type="text" name="new_url" value="{{ form.new_url or '' }}" placeholder="http://192.168.1.20:8096" required>
+    <label>新 Emby API Key</label>
+    <input type="text" name="new_api_key" value="{{ form.new_api_key or '' }}" required>
+    <button type="submit" class="btn primary" style="margin-top:12px">迁移用户</button>
+  </form>
+</div>
 
 {% if lib_results %}
 <div class="card" style="max-width:900px">
