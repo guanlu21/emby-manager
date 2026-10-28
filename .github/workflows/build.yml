@@ -1,4 +1,4 @@
-name: Build arm64 image
+name: Build multi-arch image
 
 on:
   push:
@@ -32,18 +32,34 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: linux/arm64
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/emby-manager:latest
 
-      - name: Build and export tar (for local import)
+      - name: Build and export amd64 tar (for local import)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          tags: emby-manager:latest
+          outputs: type=docker,dest=emby-manager-amd64.tar
+
+      - name: Upload amd64 tar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: emby-manager-amd64
+          path: emby-manager-amd64.tar
+          retention-days: 14
+
+      - name: Build and export arm64 tar (for local import)
         uses: docker/build-push-action@v5
         with:
           context: .
           platforms: linux/arm64
+          tags: emby-manager:latest
           outputs: type=docker,dest=emby-manager-arm64.tar
 
-      - name: Upload tar artifact
+      - name: Upload arm64 tar artifact
         uses: actions/upload-artifact@v4
         with:
           name: emby-manager-arm64
