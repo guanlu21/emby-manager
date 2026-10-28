@@ -64,12 +64,29 @@ def get_expiring_soon(days: int):
     return result
 
 
+def run_auto_backup():
+    """
+    定时自动备份。是否真的生成由「设置 - 备份」里的开关和间隔决定，
+    没开启时这个任务什么都不做，不会占用磁盘。
+    """
+    from . import backup  # 延迟导入，避免循环依赖
+    try:
+        info = backup.maybe_auto_backup()
+        if info:
+            db.add_log("-", "backup_auto", f"自动备份 {info['filename']}")
+    except Exception as e:  # 自动备份失败绝不能让调度器挂掉
+        db.add_log("-", "backup_auto_failed", str(e))
+
+
 scheduler = BackgroundScheduler()
 
 
 def start_scheduler():
     # 每 5 分钟检查一次到期状态，让到期后的自动停用更及时
     scheduler.add_job(check_and_disable_expired, "interval", minutes=5, id="expire_check", replace_existing=True)
+    # 每 30 分钟看一眼是否该做自动备份（到点才真正生成）
+    scheduler.add_job(run_auto_backup, "interval", minutes=30, id="auto_backup", replace_existing=True)
     scheduler.start()
     # 启动时立即跑一次
     check_and_disable_expired()
+    run_auto_backup()
