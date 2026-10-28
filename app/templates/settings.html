@@ -25,6 +25,19 @@
 </div>
 
 <div class="card">
+  <h3>数据备份与恢复</h3>
+  <p class="muted small">备份包含本地数据库中的用户资料、设置和操作日志。恢复前会校验 ZIP 和 SQLite 数据库；恢复成功后会退出登录，请使用备份中的管理员密码重新登录。</p>
+  <p><a class="btn primary" href="/backup">下载 ZIP 备份</a></p>
+  <form method="post" action="/backup/restore" enctype="multipart/form-data"
+        onsubmit="return confirm('恢复会覆盖当前所有用户记录、设置和操作日志，并退出当前登录。建议先下载当前备份。确定继续吗？');">
+    <label>选择要恢复的 ZIP 备份</label>
+    <input type="file" name="backup_file" accept=".zip,application/zip" required>
+    <button type="submit" class="btn danger">恢复并覆盖现有数据</button>
+  </form>
+  <div class="alert warn" style="margin-top:14px">备份文件包含 Emby API Key、管理员密码哈希、Token 和用户密码等敏感信息，请妥善保管，不要公开分享。仅支持本应用生成的 ZIP 备份，最大 256 MB。</div>
+</div>
+
+<div class="card">
   <h3>媒体库显示顺序</h3>
   {% if lib_error %}
     <p class="muted">无法从 Emby 读取媒体库列表：{{ lib_error }}</p>

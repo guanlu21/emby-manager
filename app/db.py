@@ -7,9 +7,11 @@ import json
 import os
 import time
 import secrets
+import threading
 from contextlib import contextmanager
 
 DB_PATH = os.environ.get("DB_PATH", "/app/data/app.db")
+DB_LOCK = threading.RLock()
 
 
 def _row_to_dict(row):
@@ -18,15 +20,16 @@ def _row_to_dict(row):
 
 @contextmanager
 def get_conn():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+    with DB_LOCK:
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def init_db():

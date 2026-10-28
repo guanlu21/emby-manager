@@ -3,12 +3,12 @@ import json
 import secrets
 import time
 
-from fastapi import FastAPI, Request, Form, Query
-from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
+from fastapi import FastAPI, Request, Form, Query, File, UploadFile
+from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import db, auth
+from . import db, auth, backup
 from .emby_client import EmbyClient, EmbyError
 from .scheduler import start_scheduler, check_and_disable_expired, get_expiring_soon
 
@@ -1037,6 +1037,44 @@ def settings_page(request: Request, msg: str = "", error: str = ""):
             lib_error = str(e)
     return render(request, "settings.html", settings=db.get_all_settings(),
                   msg=msg, error=error, libraries=libraries, lib_error=lib_error)
+
+
+@app.get("/backup")
+def download_backup(request: Request):
+    guard = _guard(request)
+    if guard:
+        return guard
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
+    try:
+        archive = backup.create_backup()
+    except backup.BackupError as exc:
+        return RedirectResponse(f"/settings?error={exc}", status_code=303)
+    return Response(
+        content=archive,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="emby-manager-backup-{stamp}.zip"',
+                 "Cache-Control": "no-store"},
+    )
+
+
+@app.post("/backup/restore")
+async def restore_backup(request: Request, backup_file: UploadFile = File(...)):
+    guard = _guard(request)
+    if guard:
+        return guard
+    raw = await backup_file.read(backup.MAX_ARCHIVE_BYTES + 1)
+    await backup_file.close()
+    if len(raw) > backup.MAX_ARCHIVE_BYTES:
+        return RedirectResponse("/settings?error=备份文件超过256MB限制", status_code=303)
+    try:
+        backup.restore_backup(raw)
+    except backup.BackupError as exc:
+        from urllib.parse import quote
+        return RedirectResponse(f"/settings?error={quote(str(exc), safe='')}", status_code=303)
+    # Restored data may contain a different admin password; force a fresh login.
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(auth.SESSION_COOKIE)
+    return response
 
 
 @app.get("/logs", response_class=HTMLResponse)
