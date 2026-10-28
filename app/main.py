@@ -3,12 +3,14 @@ import json
 import secrets
 import time
 
-from fastapi import FastAPI, Request, Form, Query
-from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
+from fastapi import FastAPI, Request, Form, Query, UploadFile, File
+from fastapi.responses import (
+    RedirectResponse, JSONResponse, HTMLResponse, FileResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import db, auth
+from . import db, auth, backup
 from .emby_client import EmbyClient, EmbyError
 from .scheduler import start_scheduler, check_and_disable_expired, get_expiring_soon
 
@@ -1382,6 +1384,128 @@ def reset_token(request: Request):
     import secrets
     db.set_setting("qinglong_token", secrets.token_hex(16))
     return RedirectResponse("/settings?msg=Token 已重置", status_code=303)
+
+
+# ---------------- 备份与恢复 ----------------
+
+@app.get("/backup", response_class=HTMLResponse)
+def backup_page(request: Request, msg: str = "", error: str = ""):
+    guard = _guard(request)
+    if guard:
+        return guard
+    return render(request, "backup.html",
+                  backups=backup.list_backups(),
+                  settings=db.get_all_settings(),
+                  stats=backup.db_stats(),
+                  info=backup.runtime_info(),
+                  msg=msg, error=error, restore_result=None)
+
+
+@app.post("/backup/create")
+def backup_create(request: Request):
+    guard = _guard(request)
+    if guard:
+        return guard
+    try:
+        info = backup.create_backup(kind="manual")
+    except backup.BackupError as e:
+        return RedirectResponse(f"/backup?error=备份失败：{e}", status_code=303)
+    db.add_log("-", "backup", f"创建备份 {info['filename']}")
+    return RedirectResponse(
+        f"/backup?msg=已生成备份 {info['filename']}（{info['size_text']}），可以点「下载」保存到电脑",
+        status_code=303,
+    )
+
+
+@app.get("/backup/download/{name}")
+def backup_download(request: Request, name: str):
+    guard = _guard(request)
+    if guard:
+        return guard
+    try:
+        path = backup.backup_file_path(name)
+    except backup.BackupError as e:
+        return RedirectResponse(f"/backup?error={e}", status_code=303)
+    return FileResponse(path, media_type="application/zip", filename=name)
+
+
+@app.post("/backup/delete/{name}")
+def backup_delete(request: Request, name: str):
+    guard = _guard(request)
+    if guard:
+        return guard
+    try:
+        backup.delete_backup(name)
+    except backup.BackupError as e:
+        return RedirectResponse(f"/backup?error={e}", status_code=303)
+    db.add_log("-", "backup_delete", f"删除备份 {name}")
+    return RedirectResponse(f"/backup?msg=已删除备份 {name}", status_code=303)
+
+
+@app.post("/backup/restore-file/{name}")
+def backup_restore_from_file(request: Request, name: str):
+    """用备份目录里已有的一份备份覆盖当前数据"""
+    guard = _guard(request)
+    if guard:
+        return guard
+    try:
+        path = backup.backup_file_path(name)
+        with open(path, "rb") as f:
+            data = f.read()
+        result = backup.restore_from_upload(data, original_name=name)
+    except backup.BackupError as e:
+        return RedirectResponse(f"/backup?error=恢复失败：{e}", status_code=303)
+    except OSError as e:
+        return RedirectResponse(f"/backup?error=读取备份文件失败：{e}", status_code=303)
+    return render(request, "backup.html",
+                  backups=backup.list_backups(),
+                  settings=db.get_all_settings(),
+                  stats=backup.db_stats(),
+                  info=backup.runtime_info(),
+                  msg="", error="", restore_result=result)
+
+
+@app.post("/backup/restore", response_class=HTMLResponse)
+async def backup_restore(request: Request,
+                         file: UploadFile = File(...),
+                         confirm: str = Form("")):
+    """上传备份包并恢复"""
+    guard = _guard(request)
+    if guard:
+        return guard
+    if confirm != "确认恢复":
+        return RedirectResponse("/backup?error=请先勾选确认项再恢复", status_code=303)
+    data = await file.read()
+    try:
+        result = backup.restore_from_upload(data, original_name=file.filename or "")
+    except backup.BackupError as e:
+        return RedirectResponse(f"/backup?error=恢复失败：{e}", status_code=303)
+    return render(request, "backup.html",
+                  backups=backup.list_backups(),
+                  settings=db.get_all_settings(),
+                  stats=backup.db_stats(),
+                  info=backup.runtime_info(),
+                  msg="", error="", restore_result=result)
+
+
+@app.post("/backup/auto")
+def backup_auto_settings(request: Request,
+                         enabled: str = Form(""),
+                         interval_hours: str = Form("24"),
+                         keep: str = Form("7")):
+    guard = _guard(request)
+    if guard:
+        return guard
+    try:
+        hours = max(1, int(str(interval_hours).strip() or "24"))
+        keep_n = max(1, int(str(keep).strip() or "7"))
+    except ValueError:
+        return RedirectResponse("/backup?error=间隔和保留份数必须填数字", status_code=303)
+    db.set_setting("backup_auto_enabled", "1" if enabled else "0")
+    db.set_setting("backup_auto_interval_hours", str(hours))
+    db.set_setting("backup_auto_keep", str(keep_n))
+    state = f"已开启（每 {hours} 小时一次，最多保留 {keep_n} 份）" if enabled else "已关闭"
+    return RedirectResponse(f"/backup?msg=自动备份{state}", status_code=303)
 
 
 # ---------------- 青龙面板对接接口 ----------------

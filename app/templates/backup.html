@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-head"><h2>备份与恢复</h2></div>
+
+{% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+{% if restore_result %}
+<div class="card wide">
+  <h3>恢复完成</h3>
+  <p class="muted small">已用上传的文件覆盖当前数据库，并自动补齐了老版本可能缺少的字段。</p>
+  <table class="table">
+    <tr><td data-label="来源文件">{{ restore_result.original_name or '上传文件' }}</td></tr>
+    <tr><td data-label="备份生成时间">{{ restore_result.backup_created_at or '未知（直接上传的 app.db）' }}</td></tr>
+    <tr><td data-label="恢复后用户数">{{ restore_result.after.users }} 个（启用中 {{ restore_result.after.active }} 个）</td></tr>
+    <tr><td data-label="恢复后日志条数">{{ restore_result.after.logs }} 条</td></tr>
+    <tr><td data-label="恢复前用户数">{{ restore_result.before.users }} 个</td></tr>
+    {% if restore_result.pre_backup %}
+    <tr><td data-label="恢复前自动备份">{{ restore_result.pre_backup }}（需要退回时可在下方列表里下载或恢复）</td></tr>
+    {% endif %}
+  </table>
+  <p style="margin-top:14px"><a class="btn primary" href="/">返回用户列表</a></p>
+</div>
+{% endif %}
+
+<div class="card wide">
+  <h3>当前数据</h3>
+  <table class="table">
+    <tr><td data-label="用户数">{{ stats.users }} 个（启用中 {{ stats.active }} 个）</td></tr>
+    <tr><td data-label="操作日志">{{ stats.logs }} 条</td></tr>
+    <tr><td data-label="数据库大小">{{ stats.db_size_text }}</td></tr>
+    <tr><td data-label="数据库路径"><code>{{ info.db_path }}</code></td></tr>
+    <tr><td data-label="备份目录"><code>{{ info.backup_dir }}</code></td></tr>
+    <tr><td data-label="运行环境">{{ info.arch }} / Python {{ info.python }} / v{{ info.version }}</td></tr>
+  </table>
+  <form method="post" action="/backup/create" style="margin-top:14px">
+    <button type="submit" class="btn primary">立即备份</button>
+    <span class="muted small">生成一个 zip 备份包放在备份目录里，可随时下载到电脑保存。</span>
+  </form>
+</div>
+
+<div class="card wide">
+  <h3>已有的备份文件</h3>
+  {% if not backups %}
+    <p class="muted">还没有备份文件。点上面的「立即备份」生成第一份。</p>
+  {% else %}
+  <p class="muted small">共 {{ backups|length }} 份，按时间从新到旧排列。
+    建议定期把 zip 下载到电脑或网盘，避免数据卷损坏时一起丢。</p>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>文件名</th>
+        <th>生成时间</th>
+        <th>来源</th>
+        <th>用户数</th>
+        <th>大小</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in backups %}
+      <tr>
+        <td data-label="文件名"><code>{{ b.filename }}</code>
+          {% if b.note %}<div class="muted small">{{ b.note }}</div>{% endif %}
+        </td>
+        <td data-label="生成时间">{{ b.created_at }}</td>
+        <td data-label="来源">
+          {% if b.kind == 'manual' %}手动
+          {% elif b.kind == 'auto' %}自动
+          {% elif b.kind == 'pre-restore' %}恢复前自动
+          {% else %}未知{% endif %}
+        </td>
+        <td data-label="用户数">{{ b.users if b.users is not none else '-' }}</td>
+        <td data-label="大小">{{ b.size_text }}</td>
+        <td data-label="操作" class="actions">
+          <a class="btn small" href="/backup/download/{{ b.filename }}">下载</a>
+          <form class="inline" method="post" action="/backup/restore-file/{{ b.filename }}"
+                onsubmit="return confirm('用这份备份覆盖当前数据吗？\n\n{{ b.filename }}（{{ b.created_at }}）\n\n当前数据会先被自动备份一份，恢复后本工具的 Emby 连接配置、用户记录、到期时间都会回到备份时的状态。');">
+            <button type="submit" class="btn small warn">恢复到这份</button>
+          </form>
+          <form class="inline" method="post" action="/backup/delete/{{ b.filename }}"
+                onsubmit="return confirm('确认删除备份 {{ b.filename }}？');">
+            <button type="submit" class="btn small danger">删除</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="card wide">
+  <h3>从文件恢复</h3>
+  <p class="muted small">适合换机器（比如从拾光坞 N3 换到 G2）、重装容器后把数据搬回来。
+    上传本工具导出的 <code>.zip</code> 备份包即可；也可以直接上传 <code>app.db</code>。</p>
+  <ul class="muted small">
+    <li>上传后系统会先校验文件：不是本工具的数据库、文件损坏、结构不符都会直接拒绝，当前数据不受影响。</li>
+    <li>校验通过后会先自动备份当前数据（来源标记为「恢复前自动」），再覆盖。</li>
+    <li>恢复的内容包括：Emby 地址和 API Key、管理员密码、用户记录（含密码、权限、到期时间）、青龙 Token、日志。</li>
+    <li>恢复后本工具会立刻按恢复到的用户数据工作，Emby 服务器上已有的账号不会被改动。</li>
+  </ul>
+  <form method="post" action="/backup/restore" enctype="multipart/form-data"
+        onsubmit="return confirm('确认用上传的文件覆盖当前数据？\n\n当前数据会先自动备份一份。');">
+    <label>选择备份文件（.zip 或 app.db）</label>
+    <input type="file" name="file" accept=".zip,.db,.sqlite,.sqlite3" required>
+    <label class="checkbox" style="margin-top:12px">
+      <input type="checkbox" name="confirm" value="确认恢复" required>
+      我知道这会覆盖当前所有用户记录和设置
+    </label>
+    <button type="submit" class="btn warn" style="margin-top:12px">上传并恢复</button>
+  </form>
+</div>
+
+<div class="card wide">
+  <h3>自动备份</h3>
+  <p class="muted small">开启后，容器会按间隔自动生成备份包，并且只保留最近的若干份，不会把数据卷撑满。</p>
+  <form method="post" action="/backup/auto">
+    <label class="checkbox">
+      <input type="checkbox" name="enabled" value="1" {% if settings.get('backup_auto_enabled') == '1' %}checked{% endif %}>
+      开启定时自动备份
+    </label>
+    <label>备份间隔（小时）</label>
+    <input type="text" name="interval_hours" value="{{ settings.get('backup_auto_interval_hours', '24') }}" placeholder="24">
+    <label>最多保留几份自动备份</label>
+    <input type="text" name="keep" value="{{ settings.get('backup_auto_keep', '7') }}" placeholder="7">
+    <button type="submit" class="btn primary" style="margin-top:14px">保存自动备份设置</button>
+  </form>
+</div>
+
+<div class="card wide">
+  <h3>备份包里有什么 / 注意什么</h3>
+  <ul class="muted small">
+    <li>备份包内是 <code>app.db</code>（SQLite 数据库）和 <code>meta.json</code>（生成时间、版本、架构、用户数等）。</li>
+    <li>数据库里包含 <strong>Emby API Key、管理员密码哈希、用户密码</strong>，备份包请当敏感文件保管，不要随便发到群里或公开网盘。</li>
+    <li>备份只覆盖本工具自己的数据，不含 Emby 服务器的媒体库、用户观看记录；那些属于 Emby 自身。</li>
+    <li>换机器恢复的顺序建议：新机器上先用同样的数据卷路径把容器跑起来 → 恢复备份 → 到「设置」里确认 Emby 地址和 API Key 能连通（如果新机器换了 IP，需要改一下）。</li>
+  </ul>
+</div>
+
+{% endblock %}
