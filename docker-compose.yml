@@ -1,27 +1,21 @@
-# 拾光坞 G2（x86_64）和 N3（arm64）都能用，镜像本身是多架构的：
-#   用 build: . 时构建出的是本机架构；
-#   用 image: 拉取时 docker 自动挑 amd64 / arm64。
+version: "3.8"
+
 services:
   emby-manager:
-    # 方式一：NAS 面板支持"从 Dockerfile / 源码构建"，直接用下面这行：
+    # 方式一：如果你的 NAS 面板支持"从 Dockerfile / 源码构建"，直接用下面这行：
     build: .
-    # 方式二：使用预构建好的多架构镜像（见 README 的 GitHub Actions 说明），
-    # 注释掉上面的 build: . ，改用 image: 那一行，Docker 会自动匹配架构：
+    # 方式二：如果使用预构建好的 arm64 镜像（见 README 的 GitHub Actions 说明），
+    # 注释掉上面的 build: . ，改用 image: 你的镜像地址，例如：
     # image: ghcr.io/yourname/emby-manager:latest
     container_name: emby-manager
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
-      # 数据库和备份都在这个目录里，务必备份/别乱删
       - ./data:/app/data
     environment:
       # 用于加密登录会话的密钥，建议改成随机字符串（否则每次重建容器都会重新登录）
       - SECRET_KEY=please-change-this-to-a-random-string
-      # 时区，影响日志和到期时间的显示
-      - TZ=Asia/Shanghai
-      # 备份目录（默认在数据卷内，一般不用改）
-      # - BACKUP_DIR=/app/data/backups
     # 如果 Emby 与本容器需要通过容器名互相访问，请确保它们在同一个 docker network：
     # networks:
     #   - your_existing_network
