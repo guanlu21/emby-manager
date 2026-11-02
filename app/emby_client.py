@@ -164,7 +164,15 @@ class EmbyClient:
 
     def create_user(self, username: str):
         resp = self._request("POST", "/Users/New", json={"Name": username})
-        return resp.json()
+        user = resp.json()
+        # 新建用户默认关闭“播放期间允许音频/视频转码为兼容格式”。
+        # “允许更改容器格式”（EnablePlaybackRemuxing）保持 Emby 默认（开启）。
+        # 仅在建号时设置；后续编辑用户不会覆盖管理员在 Emby 里手动改过的值。
+        self.update_policy(user["Id"], {
+            "EnableAudioPlaybackTranscoding": False,
+            "EnableVideoPlaybackTranscoding": False,
+        })
+        return user
 
     def set_password(self, emby_user_id: str, new_password: str):
         # 管理员用 API Key 重置用户密码，无需提供 CurrentPw
