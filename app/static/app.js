@@ -135,3 +135,19 @@ function resetAndCopyCredentials(userId) {
     .catch(error => alert(error.message));
 }
 
+// ---------------- 操作日志：按浏览器所在时区显示时间 ----------------
+// 服务端已按 APP_TZ（默认北京时间）渲染好兜底文本；这里再用浏览器的
+// 本地时区覆盖一次，这样服务器在 UTC、人在其它时区时也显示正确时间。
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.log-time[data-ts]').forEach(el => {
+    const ts = Number(el.dataset.ts);
+    if (!Number.isFinite(ts)) return;
+    const d = new Date(ts * 1000);
+    const pad = n => String(n).padStart(2, '0');
+    const text = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+                 `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    el.textContent = text;
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz) el.title = `浏览器时区：${tz}`;
+  });
+});

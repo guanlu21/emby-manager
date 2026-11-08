@@ -7,7 +7,7 @@
 </div>
 
 <div class="card" style="max-width:none">
-  <p class="muted small">显示最近 {{ logs|length }} 条操作记录。</p>
+  <p class="muted small">显示最近 {{ logs|length }} 条操作记录，时间按浏览器所在时区显示。</p>
   <table class="table">
     <thead>
       <tr>
@@ -20,7 +20,7 @@
     <tbody>
       {% for log in logs %}
       <tr>
-        <td data-label="时间">{{ log.time_str }}</td>
+        <td data-label="时间" class="log-time" data-ts="{{ log.ts }}">{{ log.time_str }}</td>
         <td data-label="用户">{{ log.username or '-' }}</td>
         <td data-label="操作">{{ log.action_name }}</td>
         <td data-label="详情" class="muted">{{ log.detail or '-' }}</td>

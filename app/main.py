@@ -1,5 +1,6 @@
 import datetime
 import json
+import os
 import secrets
 import time
 
@@ -8,7 +9,7 @@ from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import db, auth, backup
+from . import VERSION, db, auth, backup
 from .emby_client import EmbyClient, EmbyError
 from .scheduler import start_scheduler, check_and_disable_expired, get_expiring_soon
 
@@ -40,9 +41,31 @@ def setup_done() -> bool:
     return db.get_setting("setup_done", "0") == "1"
 
 
+def _display_tz():
+    """界面时间显示用的时区，默认北京时间（UTC+8）。
+
+    容器默认跑在 UTC，datetime.fromtimestamp(ts) 会按 UTC 渲染，日志时间
+    因此比北京时间慢 8 小时。这里默认按 Asia/Shanghai 显示，可用环境变量
+    APP_TZ 指定其它 IANA 时区；系统缺少 tzdata 时回退到固定 UTC+8（中国
+    无夏令时，结果一致）。前端还会按浏览器时区再修正一次，服务端结果同时
+    作为 JS 未加载时的兜底文本。
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(os.environ.get("APP_TZ", "Asia/Shanghai"))
+    except Exception:
+        return datetime.timezone(datetime.timedelta(hours=8))
+
+
+def _format_ts(ts, fmt="%Y-%m-%d %H:%M:%S"):
+    """把 Unix 秒级时间戳按显示时区格式化。"""
+    return datetime.datetime.fromtimestamp(ts, _display_tz()).strftime(fmt)
+
+
 def render(request, name, **ctx):
     ctx["request"] = request
     ctx["logged_in"] = auth.is_logged_in(request)
+    ctx.setdefault("version", VERSION)
     return templates.TemplateResponse(name, ctx)
 
 
@@ -1132,9 +1155,7 @@ def logs_page(request: Request):
     logs = []
     for log in db.recent_logs(200):
         log = dict(log)
-        log["time_str"] = datetime.datetime.fromtimestamp(log["ts"]).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        log["time_str"] = _format_ts(log["ts"])
         log["action_name"] = action_names.get(log["action"], log["action"])
         logs.append(log)
     return render(request, "logs.html", logs=logs)
