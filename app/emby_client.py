@@ -6,7 +6,16 @@ import httpx
 
 
 class EmbyError(Exception):
-    pass
+    """Emby API 调用失败。
+
+    status_code 保存 Emby 返回的 HTTP 状态码，供调用方区分「用户已不存在」
+    这类可容错的 404 与真正的服务端错误；连接失败、配置缺失、本地校验
+    失败等非 HTTP 错误为 None。
+    """
+
+    def __init__(self, message, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class EmbyClient:
@@ -32,7 +41,10 @@ class EmbyClient:
         except httpx.RequestError as e:
             raise EmbyError(f"无法连接到 Emby 服务器: {e}")
         if resp.status_code >= 400:
-            raise EmbyError(f"Emby 返回错误 {resp.status_code}: {resp.text[:300]}")
+            raise EmbyError(
+                f"Emby 返回错误 {resp.status_code}: {resp.text[:300]}",
+                status_code=resp.status_code,
+            )
         return resp
 
     def test_connection(self):
@@ -164,15 +176,7 @@ class EmbyClient:
 
     def create_user(self, username: str):
         resp = self._request("POST", "/Users/New", json={"Name": username})
-        user = resp.json()
-        # 新建用户默认关闭“播放期间允许音频/视频转码为兼容格式”。
-        # “允许更改容器格式”（EnablePlaybackRemuxing）保持 Emby 默认（开启）。
-        # 仅在建号时设置；后续编辑用户不会覆盖管理员在 Emby 里手动改过的值。
-        self.update_policy(user["Id"], {
-            "EnableAudioPlaybackTranscoding": False,
-            "EnableVideoPlaybackTranscoding": False,
-        })
-        return user
+        return resp.json()
 
     def set_password(self, emby_user_id: str, new_password: str):
         # 管理员用 API Key 重置用户密码，无需提供 CurrentPw

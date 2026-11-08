@@ -212,12 +212,42 @@ def _do_enable(u: dict):
     db.add_log(u["username"], "manual_enable", "")
 
 
+def _emby_user_already_gone(client, error: EmbyError, emby_user_id: str) -> bool:
+    """判断删除用户时的 404 是否真的代表「Emby 上已经没有这个账号」。
+
+    再用 GET /Users/{id} 复核一次，只有同样返回 404 才认定账号已不存在，
+    避免把接口路径变更、反向代理异常等造成的 404 误当成删除成功。
+    """
+    if getattr(error, "status_code", None) != 404 and "404" not in str(error):
+        return False
+    try:
+        client.get_user(emby_user_id)
+    except EmbyError as probe_error:
+        return (getattr(probe_error, "status_code", None) == 404
+                or "Emby 返回错误 404" in str(probe_error))
+    return False
+
+
 def _do_delete(u: dict):
+    """删除用户，返回 True 表示「Emby 侧已不存在，只清理了面板记录」。
+
+    用户在 Emby 网页端被手动删掉后，面板里的记录还在，此时 DELETE
+    /Users/{id} 会返回 404。旧逻辑直接把异常抛给页面，导致本地记录永远
+    删不掉。这里把这种 404 视为 Emby 侧已完成删除，继续做本地软删除。
+    """
     client = _get_client_or_none()
+    already_gone = False
     if client:
-        client.delete_user(u["emby_user_id"])
+        try:
+            client.delete_user(u["emby_user_id"])
+        except EmbyError as e:
+            if not _emby_user_already_gone(client, e, u["emby_user_id"]):
+                raise
+            already_gone = True
     db.delete_user_row(u["id"])
-    db.add_log(u["username"], "delete", "")
+    db.add_log(u["username"], "delete",
+               "Emby 侧已不存在，仅清理面板记录" if already_gone else "")
+    return already_gone
 
 
 def _do_extend(u: dict, days: int = 0, minutes: int = 0):
@@ -782,10 +812,13 @@ def delete_user(request: Request, user_id: int):
     if not u:
         return RedirectResponse("/?error=用户不存在", status_code=303)
     try:
-        _do_delete(u)
+        already_gone = _do_delete(u)
     except EmbyError as e:
         return RedirectResponse(f"/?error=删除失败: {e}", status_code=303)
-    return RedirectResponse(f"/?msg=已删除 {u['username']}", status_code=303)
+    msg = f"已删除 {u['username']}"
+    if already_gone:
+        msg += "（Emby 侧已不存在，仅清理面板记录）"
+    return RedirectResponse(f"/?msg={msg}", status_code=303)
 
 
 # ---------------- 批量操作 ----------------
@@ -1006,18 +1039,21 @@ def batch_delete_users(request: Request, user_ids: list = Form([])):
     guard = _guard(request)
     if guard:
         return guard
-    ok, fail = 0, 0
+    ok, fail, already_gone = 0, 0, 0
     for uid in user_ids:
         u = db.get_user(int(uid))
         if not u:
             fail += 1
             continue
         try:
-            _do_delete(u)
+            if _do_delete(u):
+                already_gone += 1
             ok += 1
         except EmbyError:
             fail += 1
     msg = f"批量删除完成：成功 {ok} 个" + (f"，失败 {fail} 个" if fail else "")
+    if already_gone:
+        msg += f"（其中 {already_gone} 个 Emby 侧已不存在，仅清理面板记录）"
     return RedirectResponse(f"/?msg={msg}", status_code=303)
 
 
